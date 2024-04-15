@@ -14,7 +14,6 @@ from data import build_dataset, build_sampler, build_dataloader
 from utils.utils import labels_to_one_hot, is_distributed, distributed_rank, set_seed, is_main_process, \
     distributed_world_size
 from utils.nested_tensor import tensor_list_to_nested_tensor
-from models.memotr import MeMOTR
 from structures.track_instances import TrackInstances
 from models.criterion import build as build_criterion, ClipCriterion
 from models.utils import get_model, save_checkpoint, load_checkpoint
@@ -34,7 +33,6 @@ def train(config: dict):
     set_seed(config["SEED"])
 
     model = build_model(config=config)
-
     # Load Pretrained Model
     if config["PRETRAINED_MODEL"] is not None:
         model = load_pretrained_model(model, config["PRETRAINED_MODEL"], show_details=False)
@@ -155,7 +153,7 @@ def train(config: dict):
     return
 
 
-def train_one_epoch(model: MeMOTR, train_states: dict, max_norm: float,
+def train_one_epoch(model, train_states: dict, max_norm: float,
                     dataloader: DataLoader, criterion: ClipCriterion, optimizer: torch.optim,
                     epoch: int, logger: Logger,
                     accumulation_steps: int = 1, use_dab: bool = False,

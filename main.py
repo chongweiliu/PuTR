@@ -90,8 +90,8 @@ def parse_option():
 def main(config: dict):
     os.environ["CUDA_VISIBLE_DEVICES"] = config["AVAILABLE_GPUS"]
 
-    torch.backends.cuda.matmul.allow_tf32 = False
-    torch.backends.cudnn.allow_tf32 = False
+    # torch.backends.cuda.matmul.allow_tf32 = False
+    # torch.backends.cudnn.allow_tf32 = False
 
     if config["USE_DISTRIBUTED"]:
         torch.distributed.init_process_group("nccl")
