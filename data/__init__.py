@@ -54,5 +54,6 @@ def build_dataloader(dataset: MOTDataset, sampler, batch_size: int, num_workers:
         sampler=sampler,
         num_workers=num_workers,
         collate_fn=collate_fn,
-        pin_memory=True
+        pin_memory=False,
+        prefetch_factor=1
     )

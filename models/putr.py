@@ -37,19 +37,20 @@ class Attention(nn.Module):
         self.flash = hasattr(torch.nn.functional, 'scaled_dot_product_attention')
         if not self.flash:
             print("WARNING: using slow attention. Flash Attention requires PyTorch >= 2.0")
-            mask = torch.full((1, 1, self.max_seq_len, self.max_seq_len), float("-inf"))
-            mask = torch.triu(mask, diagonal=1)
-            self.register_buffer("mask", mask)
+            # mask = torch.full((1, 1, self.max_seq_len, self.max_seq_len), float("-inf"))
+            # mask = torch.triu(mask, diagonal=1)
+            # self.register_buffer("mask", mask)
 
     def forward(
         self,
         x: torch.Tensor,
+        pos: torch.Tensor,
         mask: Optional[torch.Tensor] = None,
     ):
         bsz, seq_len, _ = x.shape
 
         # QKV
-        xq, xk, xv = self.wq(x), self.wk(x), self.wv(x)
+        xq, xk, xv = self.wq(x + pos), self.wk(x + pos), self.wv(x)
         xq = xq.view(bsz, seq_len, self.n_heads, self.head_dim)
         xk = xk.view(bsz, seq_len, self.n_heads, self.head_dim)
         xv = xv.view(bsz, seq_len, self.n_heads, self.head_dim)
@@ -61,15 +62,15 @@ class Attention(nn.Module):
 
         # flash implementation
         if self.flash:
-            output = torch.nn.functional.scaled_dot_product_attention(xq, xk, xv, attn_mask=mask, dropout_p=self.drop_out if self.training else 0.0, is_causal=True)
-        else:
-            # manual implementation
-            scores = torch.matmul(xq, xk.transpose(2, 3)) / math.sqrt(self.head_dim)
-            assert hasattr(self, 'mask')
-            scores = scores + self.mask[:, :, :seq_len, :seq_len]   # (bs, n_heads, seq_len, cache_len + seq_len)
-            scores = F.softmax(scores.float(), dim=-1).type_as(xq)
-            scores = self.attn_dropout(scores)
-            output = torch.matmul(scores, xv)  # (bs, n_heads, seq_len, head_dim)
+            output = torch.nn.functional.scaled_dot_product_attention(xq, xk, xv, attn_mask=mask, dropout_p=self.drop_out if self.training else 0.0, is_causal=True if mask is None else False)
+        # else:
+        #     # manual implementation
+        #     scores = torch.matmul(xq, xk.transpose(2, 3)) / math.sqrt(self.head_dim)
+        #     assert hasattr(self, 'mask')
+        #     scores = scores + self.mask[:, :, :seq_len, :seq_len]   # (bs, n_heads, seq_len, cache_len + seq_len)
+        #     scores = F.softmax(scores.float(), dim=-1).type_as(xq)
+        #     scores = self.attn_dropout(scores)
+        #     output = torch.matmul(scores, xv)  # (bs, n_heads, seq_len, head_dim)
 
         # restore time as batch dimension and concat heads
         output = output.transpose(1, 2).contiguous().view(bsz, seq_len, -1)
@@ -116,8 +117,8 @@ class TransformerBlock(nn.Module):
         self.attention_norm = nn.LayerNorm(dim, eps=norm_eps)
         self.ffn_norm = nn.LayerNorm(dim, eps=norm_eps)
 
-    def forward(self, x: torch.Tensor):
-        h = x + self.attention(self.attention_norm(x))
+    def forward(self, x: torch.Tensor, pos: torch.Tensor, mask: Optional[torch.Tensor] = None):
+        h = x + self.attention(self.attention_norm(x), pos, mask)
         out = h + self.feed_forward(self.ffn_norm(h))
         return out
 
@@ -125,21 +126,25 @@ class TransformerBlock(nn.Module):
 class PuTR(nn.Module):
     last_loss: Optional[torch.Tensor]
 
-    def __init__(self, dim: int, n_layers: int, n_heads: int, norm_eps: float, max_seq_len: int, drop_out: float=0.0):
+    def __init__(self, dim: int, n_layers: int, n_heads: int, norm_eps: float, patch_grid: int, max_seq_len: int, drop_out: float=0.0):
         super().__init__()
         self.dim = dim
         self.n_layers = n_layers
         self.n_heads = n_heads
         self.norm_eps = norm_eps
+        self.patch_grid = patch_grid
         self.max_seq_len = max_seq_len
         self.drop_out = drop_out
-
+        
+        self.input_dim = self.patch_grid * self.patch_grid * 3
         self.dropout = nn.Dropout(self.drop_out)
+        self.to_patch_embedding = nn.Linear(self.input_dim, self.dim, bias=False)
+
         self.layers = torch.nn.ModuleList()
         for layer_id in range(self.n_layers):
             self.layers.append(TransformerBlock(layer_id, self.dim, self.n_heads, self.norm_eps, self.max_seq_len, self.drop_out))
         self.norm = nn.LayerNorm(self.dim, eps=self.norm_eps)
-
+        self.mlp_head = nn.Linear(dim, self.dim)
         # init all weights
         self.apply(self._init_weights)
         # apply special scaled init to the residual projections, per GPT-2 paper
@@ -158,30 +163,17 @@ class PuTR(nn.Module):
         elif isinstance(module, nn.Embedding):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
 
-    def forward(self, tokens: torch.Tensor, targets: Optional[torch.Tensor] = None) -> torch.Tensor:
-        # _bsz, seq_len = tokens.shape
-        # h = self.tok_embeddings(tokens) #TODO: add embeddings here
-        h = tokens
+    def forward(self, tokens: torch.Tensor, pos: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+        h = self.to_patch_embedding(tokens)
         
         h = self.dropout(h)
 
         for layer in self.layers:
-            h = layer(h)
+            h = layer(h, pos, mask)
         h = self.norm(h)
+        return self.mlp_head(h)
 
-        if targets is not None:
-            # if we are given some desired targets also calculate the loss
-            logits = h # TODO: add a head here
-            self.last_loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1)
-        else:
-            # inference-time mini-optimization: only forward the output on the very last position
-            #logits = self.output(h[:, [-1], :]) # note: using list [-1] to preserve the time dim
-            logits = h #TODO: add a head here
-            self.last_loss = None
-
-        return logits
-
-    def configure_optimizers(self, weight_decay, learning_rate, betas, device_type):
+    def configure_optimizers(self, weight_decay, learning_rate, device_type):
         # start with all of the candidate parameters
         param_dict = {pn: p for pn, p in self.named_parameters()}
         # filter out those that do not require grad
@@ -202,10 +194,10 @@ class PuTR(nn.Module):
         fused_available = 'fused' in inspect.signature(torch.optim.AdamW).parameters
         use_fused = fused_available and device_type == 'cuda'
         extra_args = dict(fused=True) if use_fused else dict()
-        optimizer = torch.optim.AdamW(optim_groups, lr=learning_rate, betas=betas, **extra_args)
+        optimizer = torch.optim.AdamW(optim_groups, lr=learning_rate, betas=(0.9, 0.95), **extra_args)
         print(f"using fused AdamW: {use_fused}")
 
-        return optimizer
+        return optimizer, ["decay_params", "nodecay_params"]
 
 
     #@torch.inference_mode()
@@ -249,6 +241,7 @@ def build(config: dict):
         n_layers=config["N_LAYERS"],
         n_heads=config["N_HEADS"],
         norm_eps=config["NORM_EPS"],
+        patch_grid=config["PATCH_GRID"],
         max_seq_len=config["MAX_SEQ_LEN"],
         drop_out=config["DROP_OUT"]
         )

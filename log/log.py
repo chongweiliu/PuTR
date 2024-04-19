@@ -77,13 +77,13 @@ class MetricLog:
     def __str__(self):
         s = str()
         if "total_loss" in self.metrics:
-            s += f"loss = {self.metrics['total_loss'].avg:.4f} ({self.metrics['total_loss'].global_avg:.4f}); "
+            s += f"loss = {self.metrics['total_loss'].avg:.4f}; "
         for name, value in self.metrics.items():
             if name == "time per iter":
                 continue
             if name == "total_loss":
                 continue
-            s += f"{name} = {value.avg:.4f} ({value.global_avg:.4f}); "
+            s += f"{name} = {value.avg:.4f}; "
         return s
 
 

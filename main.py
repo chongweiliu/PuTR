@@ -20,9 +20,6 @@ def parse_option():
     # About system, Like GPUs:
     parser.add_argument("--available-gpus", type=str, help="Available GPUs, like '0,1,2,3'.")
     parser.add_argument("--use-distributed", action="store_true", help="Use distributed training.")
-    
-    parser.add_argument("--use-checkpoint", action="store_true", help="Use gradient checkpoint to save GPU memory.")
-    parser.add_argument("--checkpoint-level", type=int)
 
     # Running mode, Training? Evaluation? or ?
     parser.add_argument("--mode", type=str, help="Running mode.")
@@ -51,7 +48,7 @@ def parse_option():
     parser.add_argument("--config-path", type=str, help="Config file path.",
                         default="./configs/train_dancetrack.yaml")
     # Data Path:
-    parser.add_argument("--data-root", type=str, help="Dataset root dir.")
+    parser.add_argument("--data-root", type=str, help="Dataset root dir.", default="./datasets")
     parser.add_argument("--dataset", type=str)
     parser.add_argument("--data-path", type=str)
     # Log outputs:
@@ -90,8 +87,8 @@ def parse_option():
 def main(config: dict):
     os.environ["CUDA_VISIBLE_DEVICES"] = config["AVAILABLE_GPUS"]
 
-    # torch.backends.cuda.matmul.allow_tf32 = False
-    # torch.backends.cudnn.allow_tf32 = False
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
 
     if config["USE_DISTRIBUTED"]:
         torch.distributed.init_process_group("nccl")
