@@ -51,6 +51,7 @@ class Attention(nn.Module):
 
         # QKV
         xq, xk, xv = self.wq(x + pos), self.wk(x + pos), self.wv(x)
+        # xq, xk, xv = self.wq(x), self.wk(x), self.wv(x)
         xq = xq.view(bsz, seq_len, self.n_heads, self.head_dim)
         xk = xk.view(bsz, seq_len, self.n_heads, self.head_dim)
         xv = xv.view(bsz, seq_len, self.n_heads, self.head_dim)
@@ -117,8 +118,9 @@ class TransformerBlock(nn.Module):
         self.attention_norm = nn.LayerNorm(dim, eps=norm_eps)
         self.ffn_norm = nn.LayerNorm(dim, eps=norm_eps)
 
-    def forward(self, x: torch.Tensor, pos: torch.Tensor, mask: Optional[torch.Tensor] = None):
-        h = x + self.attention(self.attention_norm(x), pos, mask)
+    def forward(self, x: torch.Tensor, xy_pos: torch.Tensor, frame_pos: torch.Tensor, id_emb: torch.Tensor, mask: Optional[torch.Tensor] = None):
+        # x = x + frame_pos + id_emb
+        h = x + self.attention(self.attention_norm(x), xy_pos, mask)
         out = h + self.feed_forward(self.ffn_norm(h))
         return out
 
@@ -139,6 +141,8 @@ class PuTR(nn.Module):
         self.input_dim = self.patch_grid * self.patch_grid * 3
         self.dropout = nn.Dropout(self.drop_out)
         self.to_patch_embedding = nn.Linear(self.input_dim, self.dim, bias=False)
+        self.n_id_embedding = 300
+        self.id_embedding = nn.Embedding(self.n_id_embedding, dim)
 
         self.layers = torch.nn.ModuleList()
         for layer_id in range(self.n_layers):
@@ -163,15 +167,24 @@ class PuTR(nn.Module):
         elif isinstance(module, nn.Embedding):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
 
-    def forward(self, tokens: torch.Tensor, pos: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
-        h = self.to_patch_embedding(tokens)
+    def forward(self, tokens: torch.Tensor, frame_pos: torch.Tensor, xy_pos: torch.Tensor, id_emb_idx: torch.Tensor, mask: Optional[torch.Tensor] = None, is_projected=False) -> torch.Tensor:
+        if not is_projected:
+            h = self.to_patch_embedding(tokens)
+        else:
+            h = tokens
+        id_emb = self.id_embedding(id_emb_idx)
+        # id_emb = id_emb * (id_emb_idx != 0).float().unsqueeze(-1)
+        h = h + frame_pos
         
         h = self.dropout(h)
 
         for layer in self.layers:
-            h = layer(h, pos, mask)
+            h = layer(h, xy_pos, frame_pos, id_emb, mask)
         h = self.norm(h)
         return self.mlp_head(h)
+    
+    def project(self, tokens):
+        return self.to_patch_embedding(tokens)
 
     def configure_optimizers(self, weight_decay, learning_rate, device_type):
         # start with all of the candidate parameters
@@ -243,5 +256,5 @@ def build(config: dict):
         norm_eps=config["NORM_EPS"],
         patch_grid=config["PATCH_GRID"],
         max_seq_len=config["MAX_SEQ_LEN"],
-        drop_out=config["DROP_OUT"]
+        drop_out=config.get("DROP_OUT", 0.0)
         )

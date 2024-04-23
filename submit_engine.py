@@ -3,12 +3,12 @@ import os
 import json
 import torch
 import torch.nn as nn
-
+from datetime import datetime
 from tqdm import tqdm
 from os import path
 from typing import List
 from torch.utils.data import DataLoader
-from torch.nn.parallel import DistributedDataParallel as DDP
+import cv2
 
 from models import build_model
 from models.utils import load_checkpoint, get_model
@@ -19,99 +19,134 @@ from utils.box_ops import box_cxcywh_to_xyxy
 from log.logger import Logger
 from data.seq_dataset import SeqDataset
 from structures.track_instances import TrackInstances
+from models.runtime_tracker import RuntimeTracker, TI, TS
+import random
+
+random.seed(0)
+def generate_random_colors(num_colors):
+    # Generate a list of random colors
+    color_list = []
+    for i in range(num_colors):
+        color_tuple = (random.randint(0, 255), random.randint(0, 255), random.randint(0, 255))
+        color_list.append(color_tuple)
+
+    return color_list
 
 
 class Submitter:
-    def __init__(self, dataset_name: str, split_dir: str, seq_name: str, outputs_dir: str, model: nn.Module,
-                 det_score_thresh: float = 0.7, track_score_thresh: float = 0.6, result_score_thresh: float = 0.7,
-                 miss_tolerance: int = 5,
-                 use_motion: bool = False, motion_lambda: float = 0.5,
-                 motion_min_length: int = 3, motion_max_length: int = 5,
-                 use_dab: bool = False,
-                 visualize: bool = False):
+    def __init__(self, config, dataset_name: str, split_dir: str, seq_name: str, outputs_dir: str, model: nn.Module):
         self.dataset_name = dataset_name
         self.seq_name = seq_name
         self.seq_dir = path.join(split_dir, seq_name)
         self.outputs_dir = outputs_dir
         self.predict_dir = path.join(self.outputs_dir, "tracker")
         self.model = model
-        self.tracker = RuntimeTracker(det_score_thresh=det_score_thresh, track_score_thresh=track_score_thresh,
-                                      miss_tolerance=miss_tolerance,
-                                      use_motion=use_motion,
-                                      motion_min_length=motion_min_length, motion_max_length=motion_max_length,
-                                      visualize=visualize, use_dab=use_dab)
-        self.result_score_thresh = result_score_thresh
-        self.motion_lambda = motion_lambda
+        
+        self.tracker = RuntimeTracker(config, model)
+
         self.dataset = SeqDataset(seq_dir=self.seq_dir)
         self.dataloader = DataLoader(self.dataset, batch_size=1, num_workers=4, shuffle=False)
         self.device = next(self.model.parameters()).device
-        self.use_dab = use_dab
-        self.use_motion = use_motion
-        self.visualize = visualize
+
+        self.visualize = config["VISUALIZE"]
         # 对路径进行一些操作
         os.makedirs(self.predict_dir, exist_ok=True)
         if os.path.exists(os.path.join(self.predict_dir, f'{self.seq_name}.txt')):
             os.remove(os.path.join(self.predict_dir, f'{self.seq_name}.txt'))
         self.model.eval()
+        
+        self.random_color_list = generate_random_colors(100)
+        
+        self.min_track_hits = config["MIN_TRACK_HITS"]
+        
+        
+        
+        
+        
         return
 
     @torch.no_grad()
     def run(self):
-        tracks = [TrackInstances(hidden_dim=get_model(self.model).hidden_dim,
-                                 num_classes=get_model(self.model).num_classes,
-                                 use_dab=self.use_dab).to(self.device)]
+        track_hit_dict = {}
+        track_dict = {}
+        lost_dict = {}
+        new_dict = {}
+        
         bdd100k_results = []    # for bdd100k, will be converted into json file, different from other datasets.
-        for i, ((image, ori_image), info) in enumerate(tqdm(self.dataloader, desc=f"Submit seq: {self.seq_name}")):
-            # image: (1, C, H, W); ori_image: (1, H, W, C)
-            frame = tensor_list_to_nested_tensor([image[0]]).to(self.device)
-            res = self.model(frame=frame, tracks=tracks)
-            previous_tracks, new_tracks = self.tracker.update(
-                model_outputs=res,
-                tracks=tracks
-            )
-            tracks: List[TrackInstances] = get_model(self.model).postprocess_single_frame(previous_tracks, new_tracks, None)
+        for i, (img, dets, orig_dets) in enumerate(tqdm(self.dataloader, desc=f"Submit seq: {self.seq_name}")):
+            # if self.seq_name != "dancetrack0004":
+            #     continue
+            # img = img[0].cpu().numpy()[:, :, ::-1].astype("uint8")
+            # dets = dets[0].cpu().numpy().astype("int32")
+            # for j in range(len(dets)):
+            #     cv2.rectangle(img, (dets[j][0], dets[j][1]), (dets[j][2], dets[j][3]), (0, 255, 0), 2)
+            # cv2.imshow("img", img)
+            # cv2.waitKey(1)
+            
+            orig_img = img[0].clone()
+            orig_img = orig_img.cpu().numpy()[:, :, ::-1].astype("uint8")
 
-            # We do not use this...
-            # but I do not want to remove this part.
-            # WHAT IF it breaks down!!!
-            # of course not :)
-            if self.use_motion:
-                for _ in range(len(tracks[0])):
-                    if tracks[0].disappear_time[_].item() > 0:
-                        if len(self.tracker.motions[tracks[0].ids[_].item()]) >= \
-                               self.tracker.motions[tracks[0].ids[_].item()].min_record_length:
-                            tracks[0].ref_pts[_] = inverse_sigmoid(
-                                tracks[0].last_appear_boxes[_]
-                            ) + self.motion_lambda * self.tracker.motions[tracks[0].ids[_].item()].get_box_delta(
-                                miss_length=tracks[0].disappear_time[_].item()
-                            ).to(tracks[0].last_appear_boxes.device)
+            img, dets, orig_dets = img.to(self.device), dets.to(self.device), orig_dets.to(self.device)
+            dets, orig_dets = dets[0], orig_dets[0]
 
-            tracks_result = tracks[0].to(torch.device("cpu"))
-            ori_h, ori_w = ori_image.shape[1], ori_image.shape[2]
-            # box = [x, y, w, h]
-            tracks_result.area = tracks_result.boxes[:, 2] * ori_w * \
-                                 tracks_result.boxes[:, 3] * ori_h
-            tracks_result = self.filter_by_score(tracks_result, thresh=self.result_score_thresh)
-            tracks_result = self.filter_by_area(tracks_result)
-            # to xyxy:
-            tracks_result.boxes = box_cxcywh_to_xyxy(tracks_result.boxes)
-            tracks_result.boxes = (tracks_result.boxes * torch.as_tensor([ori_w, ori_h, ori_w, ori_h], dtype=torch.float))
-            if self.dataset_name == "BDD100K":
-                self.update_results(tracks_result=tracks_result, frame_idx=i, results=bdd100k_results, img_path=info[0])
-            else:
-                self.write_results(tracks_result=tracks_result, frame_idx=i)
+            trks = self.tracker.update(img, dets, orig_dets)
+            trks = trks.cpu().numpy()
+
+            dets = trks[:, TI.TLBR:TI.TLBR + 4].astype("int32")
+            orig_dets = trks[:, TI.ORIG_TLBR:TI.ORIG_TLBR + 4].astype("float32")
+            trk_cls = trks[:, TI.ClassID].astype("int32")
+            trk_scores = trks[:, TI.Score].astype("float32")
+            trk_states = trks[:, TI.State].astype("int32")
+            trk_ids = trks[:, TI.TrackID].astype("int32")
+            trk_hits = trks[:, TI.Hits].astype("int32")
 
             if self.visualize:
-                os.makedirs(f"./outputs/visualize_tmp/frame_{i+1}/", exist_ok=False)
-                os.system(f"mv ./outputs/visualize_tmp/query_updater/ ./outputs/visualize_tmp/frame_{i+1}/")
-                os.system(f"mv ./outputs/visualize_tmp/decoder/ ./outputs/visualize_tmp/frame_{i+1}/")
-                os.system(f"mv ./outputs/visualize_tmp/memotr/ ./outputs/visualize_tmp/frame_{i+1}/")
-                os.system(f"mv ./outputs/visualize_tmp/runtime_tracker/ ./outputs/visualize_tmp/frame_{i+1}/")
+                for xyxy, orig_xyxy, cls, score, state, idx in zip(dets, orig_dets, trk_cls, trk_scores, trk_states, trk_ids):
+                    if state == TS.New:
+                        cv2.rectangle(orig_img, (xyxy[0], xyxy[1]), (xyxy[2], xyxy[3]), (255, 255, 255), 2)
+                    elif state == TS.Track:
+                        cv2.rectangle(orig_img, (xyxy[0], xyxy[1]), (xyxy[2], xyxy[3]), self.random_color_list[idx % 100], 2)
+                    elif state == TS.Lost:
+                        cv2.rectangle(orig_img, (xyxy[0], xyxy[1]), (xyxy[2], xyxy[3]), (255, 125, 255), 2)
+                    cv2.putText(orig_img, f"{idx}", (xyxy[0], xyxy[1]), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+                cv2.putText(orig_img, f"Frame: {i}", (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+                cv2.imshow("img", orig_img)
+                cv2.waitKey(1)
 
-        if self.visualize:
-            visualize_save_dir = os.path.join("./outputs/visualize/", self.seq_name)
-            os.makedirs(visualize_save_dir, exist_ok=True)
-            os.system(f"mv ./outputs/visualize_tmp/* {visualize_save_dir}")
+            for idx in range(len(dets)):
+                xyxy = orig_dets[idx]
+                tlwh = [xyxy[0], xyxy[1], xyxy[2] - xyxy[0], xyxy[3] - xyxy[1]]
+                track_id = trk_ids[idx]
+                frame_id = i + 1
+                state = trk_states[idx]
+                hit = trk_hits[idx]
+                if state == TS.Track:
+                    if hit <= 3:
+                        track_hit_dict.setdefault(track_id,[]).append([frame_id, track_id, *tlwh])
+                    else:
+                        track_dict.setdefault(track_id,[]).append([frame_id, track_id, *tlwh])
+
+                        if self.dataset_name in ["MOT17", "MOT20"]:
+                            if track_id in lost_dict:
+                                track_dict[track_id].extend(lost_dict[track_id])
+                                lost_dict.pop(track_id)
+                        if track_id in new_dict:
+                            track_dict[track_id].extend(new_dict[track_id])
+                            new_dict.pop(track_id)
+                        if track_id in track_hit_dict:
+                            track_dict[track_id].extend(track_hit_dict[track_id])
+                            track_hit_dict.pop(track_id)
+                elif state == TS.Lost:
+                    lost_dict.setdefault(track_id,[]).append([frame_id, track_id, *tlwh])
+                elif state == TS.New:
+                    new_dict.setdefault(track_id,[]).append([frame_id, track_id, *tlwh])
+
+        if self.dataset_name == "BDD100K":
+            raise NotImplementedError("BDD100K dataset is not supported for submit process.")
+            # self.update_results(tracks_result=tracks_result, frame_idx=i, results=bdd100k_results, img_path=info[0])
+        else:
+            self.write_results(tracks_result=track_dict)
+
 
         if self.dataset_name == "BDD100K":
             with open(os.path.join(self.predict_dir, '{}.json'.format(self.seq_name)), 'w', encoding='utf-8') as f:
@@ -168,51 +203,41 @@ class Submitter:
         results.append(frame_result)
         return
 
-    def write_results(self, tracks_result: TrackInstances, frame_idx: int):
+    def write_results(self, tracks_result: dict):
+        assert self.dataset_name in ["DanceTrack", "SportsMOT", "MOT17", "MOT17_SPLIT"], f"{self.dataset_name} dataset is not supported for submit process."
+        
         with open(os.path.join(self.predict_dir, f"{self.seq_name}.txt"), "a") as file:
-            for i in range(len(tracks_result)):
-                if self.dataset_name == "DanceTrack" or self.dataset_name == "SportsMOT" \
-                        or self.dataset_name == "MOT17" or self.dataset_name == "MOT17_SPLIT":
-                    x1, y1, x2, y2 = tracks_result.boxes[i].tolist()
-                    w, h = x2 - x1, y2 - y1
-                    result_line = f"{frame_idx+1}," \
-                                  f"{tracks_result.ids[i].item()}," \
-                                  f"{x1},{y1},{w},{h},1,-1,-1,-1\n"
-                else:
-                    raise ValueError(f"{self.dataset_name} dataset is not supported for submit process.")
-                file.write(result_line)
+            for value in tracks_result.values():
+                for line in value:
+                    result_line = f"{line[0]}," \
+                                  f"{line[1]}," \
+                                  f"{line[2]},{line[3]},{line[4]},{line[5]},1,-1,-1,-1\n"
+                    file.write(result_line)
+        print(f"Write results to {self.predict_dir}/{self.seq_name}.txt")
         return
 
 
 def submit(config: dict):
-    submit_logger = Logger(logdir=os.path.join(config["SUBMIT_DIR"], config["SUBMIT_DATA_SPLIT"]), only_main=True)
-    submit_logger.show(head="Configs:", log=config)
-    submit_logger.write(log=config, filename="config.yaml", mode="w")
-
-    assert config["SUBMIT_DIR"] is not None, f"'--submit-dir' must not be None for submit process."
+    assert config["OUTPUTS_DIR"] is not None, f"'--outputs-dir' must not be None for submit process."
     assert config["SUBMIT_MODEL"] is not None, f"'--submit-model' must not be None for submit process."
     assert config["SUBMIT_DATA_SPLIT"] is not None, f"'--submit-data-split' must not be None for submit process."
-    train_config = yaml_to_dict(path=path.join(config["SUBMIT_DIR"], "train/config.yaml"))
-
+    outputs_dir = os.path.join(
+            config["OUTPUTS_DIR"], f"{config['SUBMIT_DATA_SPLIT']}_{datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}")
+    submit_logger = Logger(
+        logdir=outputs_dir,
+        only_main=True)
+    submit_logger.show(head="Configs:", log=config)
+    submit_logger.write(log=config, filename="config.yaml", mode="w")
+    os.mkdir(outputs_dir + "/tracker")
+    
     data_root = config["DATA_ROOT"]
-    dataset_name = train_config["DATASET"]
-    config["DATASET"] = dataset_name
+    dataset_name = config["DATASET"]
     dataset_split = config["SUBMIT_DATA_SPLIT"]
-    outputs_dir = path.join(config["SUBMIT_DIR"], dataset_split)
-    use_dab = train_config["USE_DAB"]
-    det_score_thresh = config["DET_SCORE_THRESH"]
-    track_score_thresh = config["TRACK_SCORE_THRESH"]
-    result_score_thresh = config["RESULT_SCORE_THRESH"]
-    use_motion = config["USE_MOTION"]
-    motion_min_length = config["MOTION_MIN_LENGTH"]
-    motion_max_length = config["MOTION_MAX_LENGTH"]
-    motion_lambda = config["MOTION_LAMBDA"]
-    miss_tolerance = config["MISS_TOLERANCE"]
 
-    model = build_model(config=train_config)
+    model = build_model(config=config)
     load_checkpoint(
         model=model,
-        path=path.join(config["SUBMIT_DIR"], config["SUBMIT_MODEL"])
+        path=config["SUBMIT_MODEL"]
     )
     if dataset_name == "DanceTrack" or dataset_name == "SportsMOT":
         data_split_dir = path.join(data_root, dataset_name, dataset_split)
@@ -222,31 +247,61 @@ def submit(config: dict):
         data_split_dir = path.join(data_root, dataset_name, "images", dataset_split)
     seq_names = os.listdir(data_split_dir)
 
-    if is_distributed():
-        model = DDP(module=model, device_ids=[distributed_rank()], find_unused_parameters=False)
-        total_seq_names = seq_names
-        seq_names = []
-        for i in range(len(total_seq_names)):
-            if i % distributed_world_size() == distributed_rank():
-                seq_names.append(total_seq_names[i])
-
     for seq_name in seq_names:
         seq_name = str(seq_name)
         submitter = Submitter(
+            config=config,
             dataset_name=dataset_name,
             split_dir=data_split_dir,
             seq_name=seq_name,
             outputs_dir=outputs_dir,
-            model=model,
-            use_dab=use_dab,
-            det_score_thresh=det_score_thresh,
-            track_score_thresh=track_score_thresh,
-            result_score_thresh=result_score_thresh,
-            use_motion=use_motion,
-            motion_min_length=motion_min_length,
-            motion_max_length=motion_max_length,
-            motion_lambda=motion_lambda,
-            miss_tolerance=miss_tolerance
+            model=model
         )
         submitter.run()
+    
+    if dataset_split == "val":
+        tracker_dir = os.path.join(outputs_dir, "tracker")
+        # 进行指标计算
+        data_dir = os.path.join(data_root, dataset_name)
+        if dataset_name == "DanceTrack" or dataset_name == "SportsMOT":
+            gt_dir = os.path.join(data_dir, dataset_split)
+        elif "MOT17" in dataset_name:
+            gt_dir = os.path.join(data_dir, "images", dataset_split)
+        else:
+            raise NotImplementedError(f"Eval Engine DO NOT support dataset '{dataset_name}'")
+        if dataset_name == "DanceTrack" or dataset_name == "SportsMOT":
+            os.system(
+                f"python3 TrackEval/scripts/run_mot_challenge.py --SPLIT_TO_EVAL {dataset_split}  "
+                f"--METRICS HOTA CLEAR Identity  --GT_FOLDER {gt_dir} "
+                f"--SEQMAP_FILE {os.path.join(data_dir, f'{dataset_split}_seqmap.txt')} "
+                f"--SKIP_SPLIT_FOL True --TRACKERS_TO_EVAL '' --TRACKER_SUB_FOLDER ''  --USE_PARALLEL True "
+                f"--NUM_PARALLEL_CORES 8 --PLOT_CURVES False "
+                f"--TRACKERS_FOLDER {tracker_dir}")
+        elif "MOT17" in dataset_name:
+            if "mot15" in dataset_split:
+                os.system(
+                    f"python3 TrackEval/scripts/run_mot_challenge.py --SPLIT_TO_EVAL {dataset_split}  "
+                    f"--METRICS HOTA CLEAR Identity  --GT_FOLDER {gt_dir} "
+                    f"--SEQMAP_FILE {os.path.join(data_dir, f'{dataset_split}_seqmap.txt')} "
+                    f"--SKIP_SPLIT_FOL True --TRACKERS_TO_EVAL '' --TRACKER_SUB_FOLDER ''  --USE_PARALLEL True "
+                    f"--NUM_PARALLEL_CORES 8 --PLOT_CURVES False "
+                    f"--TRACKERS_FOLDER {tracker_dir} --BENCHMARK MOT15")
+            else:
+                os.system(
+                    f"python3 TrackEval/scripts/run_mot_challenge.py --SPLIT_TO_EVAL {dataset_split}  "
+                    f"--METRICS HOTA CLEAR Identity  --GT_FOLDER {gt_dir} "
+                    f"--SEQMAP_FILE {os.path.join(data_dir, f'{dataset_split}_seqmap.txt')} "
+                    f"--SKIP_SPLIT_FOL True --TRACKERS_TO_EVAL '' --TRACKER_SUB_FOLDER ''  --USE_PARALLEL True "
+                    f"--NUM_PARALLEL_CORES 8 --PLOT_CURVES False "
+                    f"--TRACKERS_FOLDER {tracker_dir} --BENCHMARK MOT17")
+        else:
+            raise NotImplementedError(f"Do not support this Dataset name: {dataset_name}")
+        
+        metric_path = os.path.join(tracker_dir, "pedestrian_summary.txt")
+        with open(metric_path) as f:
+            metric_names = f.readline()[:-1].split(" ")
+            metric_values = f.readline()[:-1].split(" ")
+        metrics = {
+            n: float(v) for n, v in zip(metric_names, metric_values)
+        }
     return

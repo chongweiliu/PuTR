@@ -20,7 +20,6 @@ class MOT17(MOTDataset):
         self.config = config
         self.transform = transform
         self.use_motsynth = config["USE_MOTSYNTH"]
-        self.use_crowdhuman = config["USE_CROWDHUMAN"]
         self.motsynth_rate = config["MOTSYNTH_RATE"]
         if self.use_motsynth:
             multi_random_state = random.getstate()
@@ -33,8 +32,7 @@ class MOT17(MOTDataset):
         assert split == "train", f"Split {split} is NOT supported."
         self.mot17_seqs_dir = os.path.join(config["DATA_ROOT"], config["DATASET"], "images", split)
         self.mot17_gts_dir = os.path.join(config["DATA_ROOT"], config["DATASET"], "gts", split)
-        self.crowdhuman_seq_dir = os.path.join(config["DATA_ROOT"], "CrowdHuman", "images", "val")
-        self.crowdhuman_gts_dir = os.path.join(config["DATA_ROOT"], "CrowdHuman", "gts", "val")
+
         # Training MOT17, using MOT17 train split and crowdhuman val splits
         self.motsynth_seqs_dir = os.path.join(config["DATA_ROOT"], "MOTSynth", "frames")
         self.motsynth_gts_dir = os.path.join(config["DATA_ROOT"], "MOTSynth", "gts")
@@ -52,7 +50,6 @@ class MOT17(MOTDataset):
         self.sample_vid_tmax = None
 
         self.mot17_gts = defaultdict(lambda: defaultdict(list))
-        self.crowdhuman_gts = defaultdict(list)
         self.motsynth_gts = defaultdict(lambda: defaultdict(list))
 
         self.mot17_seq_names = [seq for seq in os.listdir(self.mot17_seqs_dir) if "SDP" in seq]
@@ -77,14 +74,7 @@ class MOT17(MOTDataset):
                         continue
                     x, y, w, h = map(float, xywh)
                     self.motsynth_gts[vid][int(t)].append([int(i), x, y, w, h])
-        crowdhuman_gt_filenames = os.listdir(self.crowdhuman_gts_dir)
-        for filename in crowdhuman_gt_filenames:
-            crowdhuman_gt_path = os.path.join(self.crowdhuman_gts_dir, filename)
-            image_name = filename.split(".")[0]
-            for line in open(crowdhuman_gt_path):
-                _, i, x, y, w, h = line.strip("\n").split(" ")
-                i, x, y, w, h = map(int, (i, x, y, w, h))
-                self.crowdhuman_gts[image_name].append([i, x, y, w, h])
+        
 
         self.set_epoch(epoch=0)     # init datasets
 
@@ -101,8 +91,6 @@ class MOT17(MOTDataset):
 
         if infos[0]["dataset"] == "MOT17":
             imgs, infos = self.transform["MOT17"](imgs, infos)
-        else:
-            imgs, infos = self.transform["CrowdHuman"](imgs, infos)
 
         return {
             "imgs": imgs,
@@ -122,10 +110,7 @@ class MOT17(MOTDataset):
         self.sample_mode = self.sample_modes[min(len(self.sample_modes) - 1, self.sample_stage)]
         self.sample_interval = self.sample_intervals[min(len(self.sample_intervals) - 1, self.sample_stage)]
         # End of Copy
-        # Add Crowdhuman:
-        if self.use_crowdhuman:
-            for image_name in self.crowdhuman_gts:
-                self.sample_begin_frame_paths.append(os.path.join(self.crowdhuman_seq_dir, f"{image_name}.jpg"))
+        
         if epoch >= self.sample_mot17_join:
             for vid in self.mot17_gts.keys():
                 t_min = min(self.mot17_gts[vid].keys())
@@ -155,8 +140,6 @@ class MOT17(MOTDataset):
         return
 
     def sample_frame_paths(self, begin_frame_path: str) -> list[str]:
-        if "CrowdHuman" in begin_frame_path:
-            return [begin_frame_path] * self.sample_length
         if self.sample_mode == "random_interval":
             assert self.sample_length > 1, "Sample Length is less than 2."
             vid = begin_frame_path.split("/")[-3]
@@ -175,10 +158,7 @@ class MOT17(MOTDataset):
             raise NotImplementedError(f"Do not support sample mode '{self.sample_mode}'.")
 
     def get_single_frame(self, frame_path: str):
-        if "CrowdHuman" in frame_path:
-            frame_name = frame_path.split("/")[-1].split(".")[0]
-            gt = self.crowdhuman_gts[frame_name]
-        elif "MOT17" in frame_path or "MOTSynth" in frame_path:
+        if "MOT17" in frame_path or "MOTSynth" in frame_path:
             frame_idx = int(frame_path.split("/")[-1].split(".")[0])
             vid = frame_path.split("/")[-3]
             if "MOTSynth" in frame_path:
@@ -245,28 +225,8 @@ def transforms_for_train(coco_size: bool = False, overflow_bbox: bool = False, r
                 T.MultiNormalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])  # from COCO/MOTR
             ]),
             T.MultiReverseClip(reverse=reverse_clip)
-        ]),
-        "CrowdHuman": T.MultiCompose([
-            T.MultiRandomHorizontalFlip(),
-            T.MultiRandomShift(),
-            T.MultiRandomSelect(
-                T.MultiRandomResize(scales, max_size=1536),
-                T.MultiCompose([
-                    T.MultiRandomResize([400, 500, 600] if coco_size else [800, 1000, 1200]),
-                    T.MultiRandomCrop(
-                        min_size=384 if coco_size else 800,
-                        max_size=600 if coco_size else 1200,
-                        overflow_bbox=overflow_bbox),
-                    T.MultiRandomResize(scales, max_size=1536)
-                ])
-            ),
-            T.MultiHSV(),
-            T.MultiCompose([
-                T.MultiToTensor(),
-                T.MultiNormalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])  # from COCO/MOTR
-            ]),
-            T.MultiReverseClip(reverse=reverse_clip)
         ])
+        
     }
 
 

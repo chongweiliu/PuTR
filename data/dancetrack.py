@@ -20,6 +20,7 @@ class DanceTrack(MOTDataset):
         self.config = config
         self.transform = transform
         self.dataset_name = config["DATASET"]
+        self.use_val = config["USE_VAL"]
         assert split == "train" or split == "test", f"Split {split} is not supported!"
         self.split_dir = os.path.join(config["DATA_ROOT"], self.dataset_name, split)
         assert os.path.exists(self.split_dir), f"Dir {self.split_dir} is not exist."
@@ -75,33 +76,38 @@ class DanceTrack(MOTDataset):
             imgs, infos = self.transform(imgs, infos)
         n_frames = len(infos)
         id_coors = {}
+        
         for fidx in range(n_frames):
+            pos_in_id = []
             for coor_in_frame, id in enumerate(infos[fidx]["ids"].tolist()):
                 if id not in id_coors:
                     id_coors[id] = []
                 id_coors[id].append([fidx, coor_in_frame])
-
-        n_box = infos[-1]["ids"].shape[0]
-        ids_pervious_coor = np.zeros((n_box, 2), dtype=np.int32) - 1
-        gt = []
-
-        for coor_in_frame in range(n_box):
-            id = infos[-1]["ids"][coor_in_frame].item()
-            id_coors_all_frame = id_coors[id]
-            if len(id_coors_all_frame) > 1:
-                ids_pervious_coor[coor_in_frame, :] = id_coors_all_frame[-2]
-                temp = [0.] * n_box
-                temp[coor_in_frame] = 1.
-                gt.append(temp)
-
-        infos[-1]["id_coors"] = id_coors
-        infos[-1]["ids_pervious_coor"] = torch.as_tensor(ids_pervious_coor)
-
-        if gt:
-            infos[-1]["gt"] = torch.as_tensor(gt, dtype=torch.float32)
-        else:
-            infos[-1]["gt"] = torch.zeros((0, 0))  # Assuming n_box is the second dimension you want
-
+                pos_in_id.append(len(id_coors[id]) - 1)
+            infos[fidx]["pos_in_id"] = pos_in_id
+        
+        for fidx in range(1, n_frames):
+            n_box = infos[fidx]["ids"].shape[0]
+            ids_pervious_coord = np.zeros((n_box, 2), dtype=np.int32) - 1
+            gt = []
+            for coor_in_frame in range(n_box):
+                id = infos[fidx]["ids"][coor_in_frame].item()
+                pos_in_id = infos[fidx]["pos_in_id"][coor_in_frame]
+                id_coors_all_frame = id_coors[id]
+                if len(id_coors_all_frame) > 1:
+                    ids_pervious_coord[coor_in_frame, :] = id_coors_all_frame[pos_in_id - 1]
+                    # temp = [0.] * n_box
+                    # temp[coor_in_frame] = 1.
+                    # gt.append(temp)
+                    gt.append(coor_in_frame)
+            infos[fidx]["ids_pervious_coord"] = torch.as_tensor(ids_pervious_coord)
+            if gt:
+                # infos[fidx]["gt"] = torch.as_tensor(gt, dtype=torch.float32)
+                infos[fidx]["gt"] = torch.as_tensor(gt, dtype=torch.int64)
+            else:
+                # infos[fidx]["gt"] = torch.zeros((0, 0))
+                infos[fidx]["gt"] = torch.zeros((0,), dtype=torch.int64)
+        infos[-1]["id_coords"] = id_coors
         return {
             "imgs": np.array(imgs) if self.send_img else None,
             "infos": infos
@@ -137,10 +143,11 @@ class DanceTrack(MOTDataset):
             t_min = min(self.gts[vid].keys())
             t_max = max(self.gts[vid].keys())
             self.sample_vid_tmax[vid] = t_max
-            for t in range(t_min, t_max - (self.sample_length - 1) + 1):
+            for t in range(t_min, t_max - (self.sample_length - 1) + 1, self.sample_length // 2):
                 self.sample_begin_frames.append((vid, t))
         self.sample_begin_frames = np.array(self.sample_begin_frames)
         # self.sample_begin_frames = self.sample_begin_frames[:1000]
+        print(f"Epoch {epoch}, Sample length {self.sample_length}")
 
         return
 

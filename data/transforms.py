@@ -140,50 +140,50 @@ class MultiNormalize:
 
 
     
-class MultiGridSample:
-    def __init__(self, n_grid):
-        self.n_grid = n_grid
-
-    def __call__(self, imgs, infos):
-        def grid_sample(img: torch.Tensor, info):
-            assert isinstance(img, torch.Tensor), "Image should be Tensor type before normalize."
-            img_ = img.unsqueeze(0)  # (1, C, H, W)
-            img_h, img_w = img_.shape[-2:]
-            if len(info["boxes"]) > 0:
-                box = info["boxes"] # x1y1x2y2
-                widths = box[:, 2] - box[:, 0] + 0.5
-                heights = box[:, 3] - box[:, 1] + 0.5
-
-                # 计算每个网格的宽度和高度
-                grid_widths = (widths / self.n_grid).view(-1, 1, 1)
-                grid_heights = (heights / self.n_grid).view(-1, 1, 1)
-
-                # 生成网格坐标
-                x = torch.linspace(0, self.n_grid - 1, self.n_grid, dtype=torch.float32)
-                y = torch.linspace(0, self.n_grid - 1, self.n_grid, dtype=torch.float32)
-                yv, xv = torch.meshgrid(x, y)
-
-                # 将网格坐标转化为每个网格的中点坐标
-                grid_x = box[:, 0].view(-1, 1, 1) + (xv + 0.5).unsqueeze(0) * grid_widths
-                grid_y = box[:, 1].view(-1, 1, 1) + (yv + 0.5).unsqueeze(0) * grid_heights
-
-                # 将每个网格的中点坐标拼接成一个数组
-                grid_coordinates = torch.stack((grid_x, grid_y), dim=3) #(n, 14, 14, 2)
-
-                # 将网格坐标转化为归一化坐标范围(-1, 1)
-                grid_coordinates[:, :, :, 0] = grid_coordinates[:, :, :, 0] / img_w * 2 - 1
-                grid_coordinates[:, :, :, 1] = grid_coordinates[:, :, :, 1] / img_h * 2 - 1
-
-                # 使用F.grid_sample进行采样
-                sampled_features = nF.grid_sample(
-                    img_, grid_coordinates.reshape(1, grid_coordinates.shape[0] * grid_coordinates.shape[1], grid_coordinates.shape[2], 2), mode='bilinear',
-                    padding_mode='zeros').permute(0, 2, 3, 1).reshape(-1, self.n_grid * self.n_grid * img_.shape[1])
-
-                info["sampled_features"] = sampled_features
-            else:
-                info["sampled_features"] = torch.zeros((0, self.n_grid * self.n_grid * img_.shape[1]))
-            return img, info
-        return zip(*[grid_sample(img, info) for img, info in zip(imgs, infos)])
+# class MultiGridSample:
+#     def __init__(self, n_grid):
+#         self.n_grid = n_grid
+#
+#     def __call__(self, imgs, infos):
+#         def grid_sample(img: torch.Tensor, info):
+#             assert isinstance(img, torch.Tensor), "Image should be Tensor type before normalize."
+#             img_ = img.unsqueeze(0)  # (1, C, H, W)
+#             img_h, img_w = img_.shape[-2:]
+#             if len(info["boxes"]) > 0:
+#                 box = info["boxes"] # x1y1x2y2
+#                 widths = box[:, 2] - box[:, 0] + 0.5
+#                 heights = box[:, 3] - box[:, 1] + 0.5
+#
+#                 # 计算每个网格的宽度和高度
+#                 grid_widths = (widths / self.n_grid).view(-1, 1, 1)
+#                 grid_heights = (heights / self.n_grid).view(-1, 1, 1)
+#
+#                 # 生成网格坐标
+#                 x = torch.linspace(0, self.n_grid - 1, self.n_grid, dtype=torch.float32)
+#                 y = torch.linspace(0, self.n_grid - 1, self.n_grid, dtype=torch.float32)
+#                 yv, xv = torch.meshgrid(x, y)
+#
+#                 # 将网格坐标转化为每个网格的中点坐标
+#                 grid_x = box[:, 0].view(-1, 1, 1) + (xv + 0.5).unsqueeze(0) * grid_widths
+#                 grid_y = box[:, 1].view(-1, 1, 1) + (yv + 0.5).unsqueeze(0) * grid_heights
+#
+#                 # 将每个网格的中点坐标拼接成一个数组
+#                 grid_coordinates = torch.stack((grid_x, grid_y), dim=3) #(n, 14, 14, 2)
+#
+#                 # 将网格坐标转化为归一化坐标范围(-1, 1)
+#                 grid_coordinates[:, :, :, 0] = grid_coordinates[:, :, :, 0] / img_w * 2 - 1
+#                 grid_coordinates[:, :, :, 1] = grid_coordinates[:, :, :, 1] / img_h * 2 - 1
+#
+#                 # 使用F.grid_sample进行采样
+#                 sampled_features = nF.grid_sample(
+#                     img_, grid_coordinates.reshape(1, grid_coordinates.shape[0] * grid_coordinates.shape[1], grid_coordinates.shape[2], 2), mode='bilinear',
+#                     padding_mode='zeros').permute(0, 2, 3, 1).reshape(-1, self.n_grid * self.n_grid * img_.shape[1])
+#
+#                 info["sampled_features"] = sampled_features
+#             else:
+#                 info["sampled_features"] = torch.zeros((0, self.n_grid * self.n_grid * img_.shape[1]))
+#             return img, info
+#         return zip(*[grid_sample(img, info) for img, info in zip(imgs, infos)])
 
 class MultiRandomCrop:
     def __init__(self, min_size: int, max_size: int, overflow_bbox: bool = False):

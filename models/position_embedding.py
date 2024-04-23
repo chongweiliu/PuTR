@@ -33,8 +33,25 @@ class PositionEmbeddingSine(nn.Module):
         pos_embed = torch.cat((pos_y, pos_x), dim=1)
         return pos_embed
 
+class SinusoidalPositionalEmbedding(nn.Module):
+    def __init__(self, num_pos_feats, temperature=10000):
+        super(SinusoidalPositionalEmbedding, self).__init__()
+        self.num_pos_feats = num_pos_feats
+        self.temperature = temperature
 
-def build(config: dict):
+    def forward(self, x):
+        dim_i = torch.arange(self.num_pos_feats, dtype=torch.float32, device=x.device)
+        dim_i = self.temperature ** (2 * (torch.div(dim_i, 2, rounding_mode="trunc")) / self.num_pos_feats)
+
+        pos_x = x[:, None] / dim_i
+        pos_x = torch.stack((pos_x[:, 0::2].sin(), pos_x[:, 1::2].cos()), dim=2).flatten(1)
+
+        return pos_x
+
+def build_xy_pe(config: dict):
     assert config["DIM"] % 2 == 0, f"Hidden dim should be 2x, but get {config['DIM']}."
     num_pos_feats = config["DIM"] / 2
     return PositionEmbeddingSine(num_pos_feats=num_pos_feats, normalize=True, scale=2*math.pi)
+
+def build_frame_pe(config: dict):
+    return SinusoidalPositionalEmbedding(num_pos_feats=config["DIM"], temperature=10000)

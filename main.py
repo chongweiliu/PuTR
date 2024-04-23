@@ -96,13 +96,11 @@ def main(config: dict):
 
     from train_engine import train
     from submit_engine import submit
-    from eval_engine import evaluate
+
     if config["MODE"] == "train":
         train(config=config)
     elif config["MODE"] == "submit":
         submit(config=config)
-    elif config["MODE"] == "eval":
-        evaluate(config=config)
     else:
         raise ValueError(f"Unsupported mode '{config['MODE']}'")
     return

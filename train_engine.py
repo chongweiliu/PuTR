@@ -14,14 +14,11 @@ import gc
 from typing import List, Tuple, Dict
 from torch.utils.data import DataLoader
 from torch.nn.parallel import DistributedDataParallel as DDP
-from models import build_model, build_position_embedding
+from models import build_model, build_xy_pe, build_frame_pe
 from data import build_dataset, build_sampler, build_dataloader
 from utils.utils import is_distributed, distributed_rank, set_seed, is_main_process, \
     distributed_world_size
-from utils.nested_tensor import tensor_list_to_nested_tensor
-from structures.track_instances import TrackInstances
 from models.utils import get_model, save_checkpoint, load_checkpoint
-from torch.optim import Adam, AdamW
 from torch.optim.lr_scheduler import MultiStepLR, CosineAnnealingLR
 from log.logger import Logger, ProgressLogger
 from log.log import MetricLog
@@ -127,7 +124,8 @@ def train(config: dict):
     
     multi_checkpoint = "MULTI_CHECKPOINT" in config and config["MULTI_CHECKPOINT"]
     
-    pe = build_position_embedding(config=config)
+    xy_pe = build_xy_pe(config)
+    frame_pe = build_frame_pe(config)
     
 
     # Training:
@@ -151,7 +149,9 @@ def train(config: dict):
 
         train_one_epoch(
             config=config,
-            pe=pe,
+            lrs=lrs,
+            xy_pe=xy_pe,
+            frame_pe=frame_pe,
             model=model,
             train_states=train_states,
             max_norm=config["CLIP_MAX_NORM"],
@@ -179,7 +179,7 @@ def train(config: dict):
     return
 
 
-def train_one_epoch(config: dict, pe, model, train_states: dict, max_norm: float,
+def train_one_epoch(config: dict, lrs, xy_pe, frame_pe, model, train_states: dict, max_norm: float,
                     dataloader: DataLoader, optimizer: torch.optim,
                     epoch: int, logger: Logger,
                     accumulation_steps: int = 1,
@@ -217,10 +217,19 @@ def train_one_epoch(config: dict, pe, model, train_states: dict, max_norm: float
     y = torch.linspace(0, n_grid - 1, n_grid, dtype=torch.float32).to(device)
     yv, xv = torch.meshgrid(x, y)
     
-    BECloss = nn.BCELoss()
-
+    # BECloss = nn.BCELoss()
+    CEloss = nn.CrossEntropyLoss()
     iter_start_timestamp = time.time()
     for _i, batch in enumerate(dataloader):
+        # warmup
+        # if train_states["global_iters"] <  500:
+        #     for _, param_group in enumerate(optimizer.param_groups):
+        #         param_group['lr'] = 1e-5 + (lrs[_] - 1e-5) / 500 * train_states["global_iters"]
+        #         # logger.show(head=f"[lr={param_group['lr']}] Epoch {epoch}, iter {_i}/{dataloader_len}")
+        #     optimizer.step()
+        #     optimizer.zero_grad()
+            
+        
         batch_size = len(batch["infos"])
         n_frames = len(batch["infos"][0])
         n_boxes = torch.zeros(batch_size, n_frames, dtype=torch.int32).to(device)
@@ -228,8 +237,9 @@ def train_one_epoch(config: dict, pe, model, train_states: dict, max_norm: float
         gts = []
         cxcys = []
         img_hws = []
-        _col_gts_coors = []
-        id_coors_list = []
+        _col_gts_coords = []
+        id_coords_list = []
+        n_ids = []
 
         #对物体进行采样生成 token
         for bidx in range(batch_size):
@@ -240,16 +250,21 @@ def train_one_epoch(config: dict, pe, model, train_states: dict, max_norm: float
             temp_sfeatures_list = []
             temp_cxcys = []
             temp_img_hws = []
-            id_coors_list.append(batch["infos"][bidx][-1]["id_coors"])
+            temp_gts = []
+            temp__col_gts_coords = []
+            
+            id_coords_list.append(batch["infos"][bidx][-1]["id_coords"])
+            n_ids.append(len(id_coords_list[-1]))
+            
             for fidx in range(n_frames):
                 info = batch["infos"][bidx][fidx]# x1y1x2y2
                 batch["infos"][bidx][fidx] = None
                 box = info["boxes"].to(device)
 
                 # collect gt
-                if fidx == n_frames - 1:
-                    gts.append(info["gt"])
-                    _col_gts_coors.append(info["ids_pervious_coor"])
+                if fidx > 0:
+                    temp_gts.append(info["gt"])
+                    temp__col_gts_coords.append(info["ids_pervious_coord"])
                 img_ = temp_imgs[fidx:fidx+1]# (1, C, H, W)
                 img_h, img_w = img_.shape[-2:]
                 temp_img_hws.append((img_h, img_w))
@@ -290,57 +305,79 @@ def train_one_epoch(config: dict, pe, model, train_states: dict, max_norm: float
             sfeatures_list.append(temp_sfeatures_list)
             img_hws.append(temp_img_hws)
             cxcys.append(temp_cxcys)
+            gts.append(temp_gts)
+            _col_gts_coords.append(temp__col_gts_coords)
 
         # 计算每个batch的最大box数
         max_nbox_per_frame, _ = n_boxes.max(axis=0)
-        start_coor = torch.cumsum(max_nbox_per_frame, dim=0)
-        start_coor = torch.cat([torch.tensor([0]).to(device), start_coor]) + 1
-        start_coor = start_coor.tolist()
-        #生成每个 id 在每帧中的绝对坐标
-        for bidx in range(batch_size):
-            id_coors = id_coors_list[bidx]
-            for id in id_coors.keys():
-                id_coors[id] = [start_coor[coor[0]] + coor[1] for coor in id_coors[id]]
-
-        # 生成gt的坐标
-        col_gts_coors = []
-        for coors in _col_gts_coors:
-            temp_list = []
-            for coor in coors:
-                if coor[0] != -1:
-                    temp_list.append(start_coor[coor[0]] + coor[1].item())
-            col_gts_coors.append(temp_list)
-        #生成输入 token 列表以及对应掩码
+        start_coord = torch.cumsum(max_nbox_per_frame, dim=0)
+        start_coord = torch.cat([torch.tensor([0]).to(device), start_coord]) + 1
+        start_coord = start_coord.tolist()
+        
+        # 生成输入 token 列表以及对应掩码
         inputs = torch.zeros(batch_size, 1 + max_nbox_per_frame.sum(), len_sampled_feature, device=device)
-        inputs_pos = torch.zeros(batch_size, 1 + max_nbox_per_frame.sum(), dim, device=device)
+        inputs_xy_pos = torch.zeros(batch_size, 1 + max_nbox_per_frame.sum(), dim, device=device)
+        inputs_frame_pos = torch.zeros_like(inputs_xy_pos)
         inputs_mask = torch.zeros(batch_size, 1 + max_nbox_per_frame.sum(), dtype=torch.float32, device=device)
-
+        inputs_id_emb_idxs = torch.zeros(batch_size, 1 + max_nbox_per_frame.sum(), dtype=torch.int32, device=device)
+        
+        # 生成gt的坐标
+        col_gts_coords = []
+        for bidx in range(batch_size):
+            temp_col_gts_coords = []
+            for coords in _col_gts_coords[bidx]:
+                temp_list = []
+                for coord in coords:
+                    if coord[0] != -1:
+                        temp_list.append(start_coord[coord[0]] + coord[1].item())
+                temp_col_gts_coords.append(temp_list)
+            col_gts_coords.append(temp_col_gts_coords)
+            
+        # 生成每个 id 在每帧中的绝对坐标
+        unique_emd_idxs = (torch.randperm(model.n_id_embedding - 2) + 2)[:sum(n_ids)].tolist()
+        # id_2_emb_idx = []
+        for bidx in range(batch_size):
+            # temp_id_2_emb_idx = {}
+            id_coords = id_coords_list[bidx]
+            for id in id_coords.keys():
+                # temp_id_2_emb_idx[id] = unique_emd_idxs.pop()
+                id_coords[id] = [start_coord[coord[0]] + coord[1] for coord in id_coords[id]]
+                inputs_id_emb_idxs[bidx, id_coords[id]] = unique_emd_idxs.pop()
+        inputs_id_emb_idxs[:, start_coord[-2]:] = 0
+            # id_2_emb_idx.append(temp_id_2_emb_idx)
+            
+        frame_pos = frame_pe(torch.arange(n_frames, device=device, dtype=torch.float32))
         for fidx in range(n_frames):
             for bidx in range(batch_size):
-                inputs[bidx, start_coor[fidx]:start_coor[fidx] + n_boxes[bidx, fidx]] = sfeatures_list[bidx][fidx]
-                inputs_mask[bidx, start_coor[fidx]:start_coor[fidx] + n_boxes[bidx, fidx]] = 1
+                inputs[bidx, start_coord[fidx]:start_coord[fidx] + n_boxes[bidx, fidx]] = sfeatures_list[bidx][fidx]
+                inputs_frame_pos[bidx, start_coord[fidx]:start_coord[fidx] + n_boxes[bidx, fidx]] = frame_pos[fidx]
+                inputs_mask[bidx, start_coord[fidx]:start_coord[fidx] + n_boxes[bidx, fidx]] = 1
+                if fidx == n_frames - 1:
+                    inputs_id_emb_idxs[bidx, start_coord[fidx]:start_coord[fidx] + n_boxes[bidx, fidx]] = 1
                 cxcy = cxcys[bidx][fidx]
                 img_h, img_w = img_hws[bidx][fidx]
                 if cxcy.shape[0] > 0:
-                    inputs_pos[bidx, start_coor[fidx]:start_coor[fidx] + n_boxes[bidx, fidx]] = pe(cxcy[:, 0], cxcy[:, 1], img_h, img_w)
+                    inputs_xy_pos[bidx, start_coord[fidx]:start_coord[fidx] + n_boxes[bidx, fidx]] = xy_pe(cxcy[:, 0], cxcy[:, 1], img_h, img_w)
 
 
         # attention mask
         atten_mask = (inputs_mask.unsqueeze(dim=2) @ inputs_mask.unsqueeze(dim=1)).bool()
-        link_mask = torch.zeros_like(atten_mask)
-
-        for bidx in range(batch_size):
-            id_coors = id_coors_list[bidx]
-            for coors in id_coors.values():
-                coors = torch.as_tensor(coors, device=device, dtype=torch.int32)
-                xc, yc = torch.meshgrid(coors, coors)
-                link_mask[bidx].index_put_((xc.flatten(), yc.flatten()), torch.tensor(1, device=device, dtype=torch.bool))
-            link_mask[bidx, start_coor[-2]:] = 0
-            link_mask[bidx, start_coor[-2]:, col_gts_coors[bidx]] = 1
+        # link_mask = torch.ones_like(atten_mask)
+        #
+        # for bidx in range(batch_size):
+        #     # id_coords = id_coords_list[bidx]
+        #     # for coords in id_coords.values():
+        #     #     coords = torch.as_tensor(coords, device=device, dtype=torch.int32)
+        #     #     xc, yc = torch.meshgrid(coords, coords)
+        #     #     link_mask[bidx].index_put_((xc.flatten(), yc.flatten()), torch.tensor(1, device=device, dtype=torch.bool))
+        #
+        #     link_mask[bidx, start_coord[-2]:] = 0
+        #     link_mask[bidx, start_coord[-2]:, col_gts_coords[bidx][-1]] = 1
+            
 
         for fidx in range(n_frames):
-            atten_mask[:, start_coor[fidx]:start_coor[fidx + 1], start_coor[fidx]:start_coor[fidx + 1]] = 0
-        atten_mask *= link_mask
+            atten_mask[:, start_coord[fidx]:start_coord[fidx + 1], start_coord[fidx]:start_coord[fidx + 1]] = 0
+        # atten_mask *= link_mask
         atten_mask.tril_(diagonal=0)
 
         atten_mask[:, torch.arange(atten_mask.shape[1]), torch.arange(atten_mask.shape[1])] = 1
@@ -348,21 +385,32 @@ def train_one_epoch(config: dict, pe, model, train_states: dict, max_norm: float
 
         atten_mask = atten_mask.unsqueeze(dim=1)
 
-        h = model(inputs, inputs_pos, atten_mask)
+        h = model(inputs, inputs_frame_pos, inputs_xy_pos, inputs_id_emb_idxs, atten_mask)
 
-        loss = 0
+        loss = 0.
         for bidx in range(batch_size):
-            gt = gts[bidx].to(device)
-            if gt.shape[0] == 0:
-                continue
-            temp = h[bidx, col_gts_coors[bidx]] @ h[bidx, start_coor[-2]:start_coor[-2] + gt.shape[1]].T
-            loss += BECloss(temp.sigmoid(), gt)
-        loss /= batch_size
+            for _fidx in range(n_frames - 1):
+                gt = gts[bidx][_fidx].to(device)
+                if gt.shape[0] == 0:
+                    continue
+                temp = h[bidx, col_gts_coords[bidx][_fidx]] @ h[bidx, start_coord[_fidx + 1]:start_coord[_fidx + 1] + n_boxes[bidx, _fidx + 1]].T
+                # temp = temp.sigmoid()
+                celoss = CEloss(temp, gt)
+                # becloss = BECloss(temp, gt)
+                # print(temp.softmax(1).round(decimals=2))
+                # time.sleep(1)
+                # print(gt)
+                loss += celoss
+            # print('-------------------------------')
+            # time.sleep(1)
+        loss /= (batch_size * (n_frames - 1))
+        
 
         # Metrics log
-        metric_log.update(name="loss", value=loss.item())
-        loss = loss / accumulation_steps
-        loss.backward()
+        if isinstance(loss, torch.Tensor):
+            metric_log.update(name="loss", value=loss.item())
+            loss = loss / accumulation_steps
+            loss.backward()
 
         if (_i + 1) % accumulation_steps == 0:
             if max_norm > 0:
@@ -372,7 +420,7 @@ def train_one_epoch(config: dict, pe, model, train_states: dict, max_norm: float
             optimizer.step()
             optimizer.zero_grad()
 
-        del atten_mask, link_mask, inputs, inputs_pos, inputs_mask, h, loss
+        del atten_mask, inputs, inputs_xy_pos, inputs_mask, h, loss
 
 
 
@@ -381,7 +429,7 @@ def train_one_epoch(config: dict, pe, model, train_states: dict, max_norm: float
         metric_log.update(name="time per iter", value=iter_end_timestamp-iter_start_timestamp)
         iter_start_timestamp = iter_end_timestamp
         # Outputs logs
-        if _i % 10 == 0:
+        if _i % config["ACCUMULATION_STEPS"] == 0:
             metric_log.sync()
             max_memory = max([torch.cuda.max_memory_allocated(torch.device('cuda', _i))
                               for _i in range(distributed_world_size())]) // (1024**2)
@@ -418,23 +466,4 @@ def train_one_epoch(config: dict, pe, model, train_states: dict, max_norm: float
     return
 
 
-# class BCEFocalLoss(torch.nn.Module):
-#     """
-#     二分类的Focalloss alpha 固定
-#     """
-#
-#     def __init__(self, gamma=2, alpha=0.25, reduction='elementwise_mean'):
-#         super().__init__()
-#         self.gamma = gamma
-#         self.alpha = alpha
-#         self.reduction = reduction
-#
-#     def forward(self, _input, target):
-#         pt = torch.sigmoid(_input)
-#         alpha = self.alpha
-#         loss = - alpha * (1 - pt) ** self.gamma * target * torch.log(pt) - \
-#                (1 - alpha) * pt ** self.gamma * (1 - target) * torch.log(1 - pt)
-#         if self.reduction == 'elementwise_mean':
-#             return torch.mean(loss)
-#         elif self.reduction == 'sum':
-#             return torch.sum(loss)
+
