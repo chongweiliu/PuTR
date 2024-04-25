@@ -307,7 +307,7 @@ def train_one_epoch(config: dict, lrs, xy_pe, frame_pe, model, train_states: dic
             cxcys.append(temp_cxcys)
             gts.append(temp_gts)
             _col_gts_coords.append(temp__col_gts_coords)
-
+        del temp_sfeatures_list, temp_cxcys, temp_img_hws, temp_gts, temp__col_gts_coords
         # 计算每个batch的最大box数
         max_nbox_per_frame, _ = n_boxes.max(axis=0)
         start_coord = torch.cumsum(max_nbox_per_frame, dim=0)
@@ -319,7 +319,8 @@ def train_one_epoch(config: dict, lrs, xy_pe, frame_pe, model, train_states: dic
         inputs_xy_pos = torch.zeros(batch_size, 1 + max_nbox_per_frame.sum(), dim, device=device)
         inputs_frame_pos = torch.zeros_like(inputs_xy_pos)
         inputs_mask = torch.zeros(batch_size, 1 + max_nbox_per_frame.sum(), dtype=torch.float32, device=device)
-        inputs_id_emb_idxs = torch.zeros(batch_size, 1 + max_nbox_per_frame.sum(), dtype=torch.int32, device=device)
+        inputs_id_emb_idxs = 1
+        # inputs_id_emb_idxs = torch.zeros(batch_size, 1 + max_nbox_per_frame.sum(), dtype=torch.int32, device=device)
         
         # 生成gt的坐标
         col_gts_coords = []
@@ -334,7 +335,7 @@ def train_one_epoch(config: dict, lrs, xy_pe, frame_pe, model, train_states: dic
             col_gts_coords.append(temp_col_gts_coords)
             
         # 生成每个 id 在每帧中的绝对坐标
-        unique_emd_idxs = (torch.randperm(model.n_id_embedding - 2) + 2)[:sum(n_ids)].tolist()
+        # unique_emd_idxs = (torch.randperm(model.n_id_embedding - 2) + 2)[:sum(n_ids)].tolist()
         # id_2_emb_idx = []
         for bidx in range(batch_size):
             # temp_id_2_emb_idx = {}
@@ -342,8 +343,8 @@ def train_one_epoch(config: dict, lrs, xy_pe, frame_pe, model, train_states: dic
             for id in id_coords.keys():
                 # temp_id_2_emb_idx[id] = unique_emd_idxs.pop()
                 id_coords[id] = [start_coord[coord[0]] + coord[1] for coord in id_coords[id]]
-                inputs_id_emb_idxs[bidx, id_coords[id]] = unique_emd_idxs.pop()
-        inputs_id_emb_idxs[:, start_coord[-2]:] = 0
+                # inputs_id_emb_idxs[bidx, id_coords[id]] = unique_emd_idxs.pop()
+        # inputs_id_emb_idxs[:, start_coord[-2]:] = 0
             # id_2_emb_idx.append(temp_id_2_emb_idx)
             
         frame_pos = frame_pe(torch.arange(n_frames, device=device, dtype=torch.float32))
@@ -352,8 +353,8 @@ def train_one_epoch(config: dict, lrs, xy_pe, frame_pe, model, train_states: dic
                 inputs[bidx, start_coord[fidx]:start_coord[fidx] + n_boxes[bidx, fidx]] = sfeatures_list[bidx][fidx]
                 inputs_frame_pos[bidx, start_coord[fidx]:start_coord[fidx] + n_boxes[bidx, fidx]] = frame_pos[fidx]
                 inputs_mask[bidx, start_coord[fidx]:start_coord[fidx] + n_boxes[bidx, fidx]] = 1
-                if fidx == n_frames - 1:
-                    inputs_id_emb_idxs[bidx, start_coord[fidx]:start_coord[fidx] + n_boxes[bidx, fidx]] = 1
+                # if fidx == n_frames - 1:
+                #     inputs_id_emb_idxs[bidx, start_coord[fidx]:start_coord[fidx] + n_boxes[bidx, fidx]] = 1
                 cxcy = cxcys[bidx][fidx]
                 img_h, img_w = img_hws[bidx][fidx]
                 if cxcy.shape[0] > 0:
@@ -386,7 +387,7 @@ def train_one_epoch(config: dict, lrs, xy_pe, frame_pe, model, train_states: dic
         atten_mask = atten_mask.unsqueeze(dim=1)
 
         h = model(inputs, inputs_frame_pos, inputs_xy_pos, inputs_id_emb_idxs, atten_mask)
-
+        del inputs, inputs_frame_pos, inputs_xy_pos, inputs_id_emb_idxs, atten_mask
         loss = 0.
         for bidx in range(batch_size):
             for _fidx in range(n_frames - 1):
@@ -403,6 +404,7 @@ def train_one_epoch(config: dict, lrs, xy_pe, frame_pe, model, train_states: dic
                 loss += celoss
             # print('-------------------------------')
             # time.sleep(1)
+        del gt, temp
         loss /= (batch_size * (n_frames - 1))
         
 
@@ -420,8 +422,9 @@ def train_one_epoch(config: dict, lrs, xy_pe, frame_pe, model, train_states: dic
             optimizer.step()
             optimizer.zero_grad()
 
-        del atten_mask, inputs, inputs_xy_pos, inputs_mask, h, loss
-
+        del h, loss
+        
+        torch.cuda.empty_cache()
 
 
         # For logging

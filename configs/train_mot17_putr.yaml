@@ -1,7 +1,3 @@
-# @Author       : Ruopeng Gao
-# @Description  : Config for training DanceTrack.
-#                 We change some parameters compared with our paper, looking forward more stable training convergence.
-
 GIT_VERSION:
 
 MODE: train
@@ -9,7 +5,7 @@ CONFIG_PATH:
 VISUALIZE: False
 AVAILABLE_GPUS: 0,
 DEVICE: cuda
-OUTPUTS_DIR: ./outputs/putr_dancetrack/
+OUTPUTS_DIR: ./outputs/putr_mot17/
 USE_DISTRIBUTED: False
 
 RESUME:
@@ -19,7 +15,7 @@ MULTI_CHECKPOINT: False
 
 
 # About data processing
-DATASET: DanceTrack
+DATASET: MOT17
 USE_MOTSYNTH:
 USE_CROWDHUMAN:
 MOTSYNTH_RATE:
@@ -42,7 +38,7 @@ PATCH_GRID: 64
 MAX_SEQ_LEN: 4096
 
 # Pretrain model
-PRETRAINED_MODEL:
+PRETRAINED_MODEL: /home/lcw/hdd/projects/PuTR/论文数据/mix/train_2024-04-24-11-53/checkpoint_6.pth
 
 # Sampling setting
 SAMPLE_STEPS: [1, 2, 3, 4, 5, 6]

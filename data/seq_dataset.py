@@ -16,12 +16,15 @@ class SeqDataset(Dataset):
         else:
             image_paths = sorted(os.listdir(os.path.join(seq_dir, "img1")))
             image_paths = [os.path.join(seq_dir, "img1", _) for _ in image_paths if ("jpg" in _) or ("png" in _)]
+        
         if 'DanceTrack' in seq_dir:
             det_path = os.path.join(seq_dir, 'det', 'byte065.txt')
         elif 'SportsMOT' in seq_dir:
             det_path = os.path.join(seq_dir, 'det', 'yolox_x_train.txt')
             # det_path = os.path.join(seq_dir, 'det', 'yolox_x_mix.txt')
         elif 'MOT17' in seq_dir:
+            det_path = os.path.join(seq_dir, 'det', 'byte065.txt')
+        elif 'MOT20' in seq_dir:
             det_path = os.path.join(seq_dir, 'det', 'byte065.txt')
         else:
             raise NotImplementedError(f"SeqDataset DO NOT support dataset '{seq_dir}'")
@@ -84,6 +87,9 @@ class SeqDataset(Dataset):
                 dets = np.concatenate([dets, np.ones((len(dets), 1), dtype=np.float32)], axis=1)
                 orig_dets = np.concatenate([orig_dets, np.ones((len(orig_dets), 1), dtype=np.float32)], axis=1)
             elif 'MOT17' in self.seq_dir:
+                dets = np.concatenate([dets, np.ones((len(dets), 1), dtype=np.float32)], axis=1)
+                orig_dets = np.concatenate([orig_dets, np.ones((len(orig_dets), 1), dtype=np.float32)], axis=1)
+            elif 'MOT20' in self.seq_dir:
                 dets = np.concatenate([dets, np.ones((len(dets), 1), dtype=np.float32)], axis=1)
                 orig_dets = np.concatenate([orig_dets, np.ones((len(orig_dets), 1), dtype=np.float32)], axis=1)
             else:

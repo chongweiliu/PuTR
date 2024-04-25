@@ -6,7 +6,7 @@ GIT_VERSION:
 
 MODE: submit
 CONFIG_PATH:
-VISUALIZE: True
+VISUALIZE: False
 AVAILABLE_GPUS: 0,
 DEVICE: cuda
 OUTPUTS_DIR: ./outputs/putr_sportsmot/
@@ -17,7 +17,7 @@ RESUME_SCHEDULER: True
 MULTI_CHECKPOINT: False
 
 # About submit
-SUBMIT_MODEL: /home/lcw/hdd/projects/PuTR/outputs/putr_dancetrack/exp/固定512-6-train_2024-04-23-11-30/checkpoint_5.pth
+SUBMIT_MODEL: /home/lcw/hdd/projects/PuTR/论文数据/sportsmot/无初始化直接训练train_2024-04-23-16-31/checkpoint_6.pth
 SUBMIT_DATA_SPLIT: val
 DET_SCORE_THRESH: 0.1
 TRACK_SCORE_THRESH: 0.6
@@ -26,7 +26,8 @@ MAX_NFRAMES: 30
 MIN_TRACK_HITS: 3
 NEW_TRK_TOLERANCE: 3
 DETS_IOU_THRESH: 0.3
-
+ASSO_THRE1: 0.2
+ASSO_THRE2: 0.2
 
 # About model
 DIM: 512

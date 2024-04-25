@@ -42,19 +42,19 @@ PATCH_GRID: 64
 MAX_SEQ_LEN: 4096
 
 # Pretrain model
-PRETRAINED_MODEL:
+PRETRAINED_MODEL: /home/lcw/hdd/projects/PuTR/论文数据/mix/train_2024-04-24-11-53/checkpoint_6.pth
 
 # Sampling setting
-SAMPLE_STEPS: [1, 2, 3, 4, 5, 6]
-SAMPLE_LENGTHS: [4, 8, 16, 32, 64, 128]
+SAMPLE_STEPS: [1, 2]
+SAMPLE_LENGTHS: [32, 32, 32]
 SAMPLE_MODES: [random_interval]
 SAMPLE_INTERVALS: [10]
 
 # Training setting
 SEED: 42
-EPOCHS: 7
+EPOCHS: 3
 DROP_OUT: 0.0
-LR: 2.0e-4
+LR: 1.0e-4
 WEIGHT_DECAY: 0.0005
 CLIP_MAX_NORM: 1.0
 LR_SCHEDULER: Cosine

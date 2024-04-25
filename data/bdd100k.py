@@ -10,8 +10,9 @@ import torch
 from PIL import Image
 import data.transforms as T
 # from typing import List
-# from torch.utils.data import Dataset
-from .mot import MOTDataset
+from torch.utils.data import Dataset
+
+
 from collections import defaultdict
 
 import matplotlib.pyplot as plt
@@ -46,7 +47,7 @@ def label_to_category():
     }
 
 
-class BDD100K(MOTDataset):
+class BDD100K(Dataset):
     def __init__(self, config: dict, split: str, transform):
         """
         Args:
@@ -54,7 +55,7 @@ class BDD100K(MOTDataset):
             split:
             transform:
         """
-        super(BDD100K, self).__init__(config=config, split=split, transform=transform)
+        super(BDD100K, self).__init__()
 
         self.config = config        # 配置信息
         self.transform = transform  # 数据需要经过的变换

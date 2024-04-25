@@ -9,6 +9,11 @@ from os import path
 from typing import List
 from torch.utils.data import DataLoader
 import cv2
+import shutil
+import numpy as np
+import os
+import glob
+
 
 from models import build_model
 from models.utils import load_checkpoint, get_model
@@ -126,10 +131,10 @@ class Submitter:
                     else:
                         track_dict.setdefault(track_id,[]).append([frame_id, track_id, *tlwh])
 
-                        if self.dataset_name in ["MOT17", "MOT20"]:
-                            if track_id in lost_dict:
-                                track_dict[track_id].extend(lost_dict[track_id])
-                                lost_dict.pop(track_id)
+                        # if self.dataset_name in ["MOT17", "MOT20"]:
+                        #     if track_id in lost_dict and len(lost_dict[track_id]) < 3:
+                        #         track_dict[track_id].extend(lost_dict[track_id])
+                        #         lost_dict.pop(track_id)
                         if track_id in new_dict:
                             track_dict[track_id].extend(new_dict[track_id])
                             new_dict.pop(track_id)
@@ -204,16 +209,45 @@ class Submitter:
         return
 
     def write_results(self, tracks_result: dict):
-        assert self.dataset_name in ["DanceTrack", "SportsMOT", "MOT17", "MOT17_SPLIT"], f"{self.dataset_name} dataset is not supported for submit process."
+        assert self.dataset_name in ["DanceTrack", "SportsMOT", "MOT17", "MOT20"], f"{self.dataset_name} dataset is not supported for submit process."
         
         with open(os.path.join(self.predict_dir, f"{self.seq_name}.txt"), "a") as file:
             for value in tracks_result.values():
                 for line in value:
-                    result_line = f"{line[0]}," \
-                                  f"{line[1]}," \
+                    result_line = f"{int(line[0])}," \
+                                  f"{int(line[1])}," \
                                   f"{line[2]},{line[3]},{line[4]},{line[5]},1,-1,-1,-1\n"
                     file.write(result_line)
         print(f"Write results to {self.predict_dir}/{self.seq_name}.txt")
+        if self.dataset_name in ["MOT17"]:
+            shutil.copyfile(os.path.join(self.predict_dir, f"{self.seq_name}.txt"),
+                            os.path.join(self.predict_dir, f"{self.seq_name.replace('FRCNN', 'DPM')}.txt"))
+            shutil.copyfile(os.path.join(self.predict_dir, f"{self.seq_name}.txt"),
+                            os.path.join(self.predict_dir, f"{self.seq_name.replace('FRCNN', 'SDP')}.txt"))
+            print(f"Copy results to {self.predict_dir}/{self.seq_name.replace('FRCNN', 'DPM')}.txt")
+            print(f"Copy results to {self.predict_dir}/{self.seq_name.replace('FRCNN', 'SDP')}.txt")
+            
+            
+        if self.dataset_name in ["MOT17", "MOT20"]:
+            print(f"Run interpolation for {self.seq_name}")
+            tracks_result = dti(f"{self.predict_dir}/{self.seq_name}.txt")
+            if not os.path.exists(self.predict_dir + f"/dti"):
+                os.makedirs(self.predict_dir + f"/dti")
+            with open(self.predict_dir + f"/dti/{self.seq_name}.txt", "a") as file:
+                for line in tracks_result:
+                    result_line = f"{int(line[0])}," \
+                                  f"{int(line[1])}," \
+                                  f"{line[2]},{line[3]},{line[4]},{line[5]},1,-1,-1,-1\n"
+                    file.write(result_line)
+            print(f"Write interpolated results to {self.predict_dir}/dti/{self.seq_name}.txt")
+            if self.dataset_name in ["MOT17"]:
+                shutil.copyfile(self.predict_dir + f"/dti/{self.seq_name}.txt",
+                                self.predict_dir + f"/dti/{self.seq_name.replace('FRCNN', 'DPM')}.txt")
+                shutil.copyfile(self.predict_dir + f"/dti/{self.seq_name}.txt",
+                                self.predict_dir + f"/dti/{self.seq_name.replace('FRCNN', 'SDP')}.txt")
+                print(f"Copy interpolated results to {self.predict_dir}/dti/{self.seq_name.replace('FRCNN', 'DPM')}.txt")
+                print(f"Copy interpolated results to {self.predict_dir}/dti/{self.seq_name.replace('FRCNN', 'SDP')}.txt")
+            
         return
 
 
@@ -241,11 +275,20 @@ def submit(config: dict):
     )
     if dataset_name == "DanceTrack" or dataset_name == "SportsMOT":
         data_split_dir = path.join(data_root, dataset_name, dataset_split)
+        seq_names = os.listdir(data_split_dir)
     elif dataset_name == "BDD100K":
         data_split_dir = path.join(data_root, dataset_name, "images/track/", dataset_split)
+        seq_names = os.listdir(data_split_dir)
+    elif dataset_name == "MOT17":
+        data_split_dir = path.join(data_root, dataset_name, dataset_split)
+        seq_names = os.listdir(data_split_dir)
+        seq_names = [seq_name for seq_name in seq_names if "FRCNN" in seq_name]
+    elif dataset_name == "MOT20":
+        data_split_dir = path.join(data_root, dataset_name, dataset_split)
+        seq_names = os.listdir(data_split_dir)
     else:
-        data_split_dir = path.join(data_root, dataset_name, "images", dataset_split)
-    seq_names = os.listdir(data_split_dir)
+        raise NotImplementedError(f"Do not support this Dataset name: {dataset_name}")
+    
 
     for seq_name in seq_names:
         seq_name = str(seq_name)
@@ -278,22 +321,13 @@ def submit(config: dict):
                 f"--NUM_PARALLEL_CORES 8 --PLOT_CURVES False "
                 f"--TRACKERS_FOLDER {tracker_dir}")
         elif "MOT17" in dataset_name:
-            if "mot15" in dataset_split:
-                os.system(
-                    f"python3 TrackEval/scripts/run_mot_challenge.py --SPLIT_TO_EVAL {dataset_split}  "
-                    f"--METRICS HOTA CLEAR Identity  --GT_FOLDER {gt_dir} "
-                    f"--SEQMAP_FILE {os.path.join(data_dir, f'{dataset_split}_seqmap.txt')} "
-                    f"--SKIP_SPLIT_FOL True --TRACKERS_TO_EVAL '' --TRACKER_SUB_FOLDER ''  --USE_PARALLEL True "
-                    f"--NUM_PARALLEL_CORES 8 --PLOT_CURVES False "
-                    f"--TRACKERS_FOLDER {tracker_dir} --BENCHMARK MOT15")
-            else:
-                os.system(
-                    f"python3 TrackEval/scripts/run_mot_challenge.py --SPLIT_TO_EVAL {dataset_split}  "
-                    f"--METRICS HOTA CLEAR Identity  --GT_FOLDER {gt_dir} "
-                    f"--SEQMAP_FILE {os.path.join(data_dir, f'{dataset_split}_seqmap.txt')} "
-                    f"--SKIP_SPLIT_FOL True --TRACKERS_TO_EVAL '' --TRACKER_SUB_FOLDER ''  --USE_PARALLEL True "
-                    f"--NUM_PARALLEL_CORES 8 --PLOT_CURVES False "
-                    f"--TRACKERS_FOLDER {tracker_dir} --BENCHMARK MOT17")
+            os.system(
+                f"python3 TrackEval/scripts/run_mot_challenge.py --SPLIT_TO_EVAL {dataset_split}  "
+                f"--METRICS HOTA CLEAR Identity  --GT_FOLDER {gt_dir} "
+                f"--SEQMAP_FILE {os.path.join(data_dir, f'{dataset_split}_seqmap.txt')} "
+                f"--SKIP_SPLIT_FOL True --TRACKERS_TO_EVAL '' --TRACKER_SUB_FOLDER ''  --USE_PARALLEL True "
+                f"--NUM_PARALLEL_CORES 8 --PLOT_CURVES False "
+                f"--TRACKERS_FOLDER {tracker_dir} --BENCHMARK MOT17")
         else:
             raise NotImplementedError(f"Do not support this Dataset name: {dataset_name}")
         
@@ -305,3 +339,50 @@ def submit(config: dict):
             n: float(v) for n, v in zip(metric_names, metric_values)
         }
     return
+
+def dti(txt_path, n_min=25, n_dti=300): #n_dti MOT20 20; MOT17 3
+    seq_data = np.loadtxt(txt_path, dtype=np.float64, delimiter=',')
+    min_id = int(np.min(seq_data[:, 1]))
+    max_id = int(np.max(seq_data[:, 1]))
+    seq_results = np.zeros((1, 10), dtype=np.float64)
+    for track_id in range(min_id, max_id + 1):
+        index = (seq_data[:, 1] == track_id)
+        tracklet = seq_data[index]
+        # sort
+        tracklet = tracklet[tracklet[:, 0].argsort()]
+        tracklet_dti = tracklet
+        if tracklet.shape[0] == 0:
+            continue
+        n_frame = tracklet.shape[0]
+        if n_frame > n_min:
+            frames = tracklet[:, 0]
+            frames_dti = {}
+            for i in range(0, n_frame):
+                right_frame = frames[i]
+                if i > 0:
+                    left_frame = frames[i - 1]
+                else:
+                    left_frame = frames[i]
+                # disconnected track interpolation
+                if 1 < right_frame - left_frame < n_dti:
+                    num_bi = int(right_frame - left_frame - 1)
+                    right_bbox = tracklet[i, 2:6]
+                    left_bbox = tracklet[i - 1, 2:6]
+                    for j in range(1, num_bi + 1):
+                        curr_frame = j + left_frame
+                        curr_bbox = (curr_frame - left_frame) * (right_bbox - left_bbox) / \
+                                    (right_frame - left_frame) + left_bbox
+                        frames_dti[curr_frame] = curr_bbox
+            num_dti = len(frames_dti.keys())
+            if num_dti > 0:
+                data_dti = np.zeros((num_dti, 10), dtype=np.float64)
+                for n in range(num_dti):
+                    data_dti[n, 0] = list(frames_dti.keys())[n]
+                    data_dti[n, 1] = track_id
+                    data_dti[n, 2:6] = frames_dti[list(frames_dti.keys())[n]]
+                    data_dti[n, 6:] = [1, -1, -1, -1]
+                tracklet_dti = np.vstack((tracklet, data_dti))
+        seq_results = np.vstack((seq_results, tracklet_dti))
+    seq_results = seq_results[1:]
+    seq_results = seq_results[seq_results[:, 0].argsort()]
+    return seq_results

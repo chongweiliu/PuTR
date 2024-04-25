@@ -56,13 +56,6 @@ def load_pretrained_model(model: nn.Module, pretrained_path: str, show_details: 
     pretrained_checkpoint = torch.load(pretrained_path, map_location=lambda storage, loc: storage)
     pretrained_state_dict = pretrained_checkpoint["model"]
     model_state_dict = model.state_dict()
-    
-    # # fix the keys of the state dictionary :(
-    # # honestly no idea how checkpoints sometimes get this prefix, have to debug more
-    # unwanted_prefix = "_orig_mod."
-    # for k, v in list(pretrained_state_dict.items()):
-    #     if k.startswith(unwanted_prefix):
-    #         pretrained_state_dict[k[len(unwanted_prefix):]] = pretrained_state_dict.pop(k)
 
     not_in_model = 0
     for k in pretrained_state_dict:
@@ -81,7 +74,7 @@ def load_pretrained_model(model: nn.Module, pretrained_path: str, show_details: 
 
     model.load_state_dict(state_dict=pretrained_state_dict, strict=False)
     print(f"Pretrained model is loaded, there are {not_in_model} parameters droped "
-          f"and {not_in_pretrained} parameters unloaded, set 'show details' True to see more details.")
+          f"and {not_in_pretrained} parameters unloaded.")
 
     return model
 

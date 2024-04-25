@@ -9,7 +9,7 @@ CONFIG_PATH:
 VISUALIZE: False
 AVAILABLE_GPUS: 0,
 DEVICE: cuda
-OUTPUTS_DIR: ./outputs/putr_dancetrack/
+OUTPUTS_DIR: ./outputs/putr_mix/
 USE_DISTRIBUTED: False
 
 RESUME:
@@ -19,7 +19,7 @@ MULTI_CHECKPOINT: False
 
 
 # About data processing
-DATASET: DanceTrack
+DATASET: MIX
 USE_MOTSYNTH:
 USE_CROWDHUMAN:
 MOTSYNTH_RATE:
@@ -46,7 +46,7 @@ PRETRAINED_MODEL:
 
 # Sampling setting
 SAMPLE_STEPS: [1, 2, 3, 4, 5, 6]
-SAMPLE_LENGTHS: [4, 8, 16, 32, 64, 128]
+SAMPLE_LENGTHS: [4, 8, 16, 32, 64, 64]
 SAMPLE_MODES: [random_interval]
 SAMPLE_INTERVALS: [10]
 

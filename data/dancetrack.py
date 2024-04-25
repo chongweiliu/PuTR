@@ -8,19 +8,18 @@ import torch
 import cv2
 import numpy as np
 import data.transforms as T
-from .mot import MOTDataset
+from torch.utils.data import Dataset
 from collections import defaultdict
 from memory_profiler import profile
 
-class DanceTrack(MOTDataset):
+class DanceTrack(Dataset):
     
     def __init__(self, config: dict, split: str, transform):
-        super(DanceTrack, self).__init__(config=config, split=split, transform=transform)
+        super(DanceTrack, self).__init__()
 
         self.config = config
         self.transform = transform
         self.dataset_name = config["DATASET"]
-        self.use_val = config["USE_VAL"]
         assert split == "train" or split == "test", f"Split {split} is not supported!"
         self.split_dir = os.path.join(config["DATA_ROOT"], self.dataset_name, split)
         assert os.path.exists(self.split_dir), f"Dir {self.split_dir} is not exist."
@@ -207,7 +206,7 @@ class DanceTrack(MOTDataset):
         return imgs, infos
 
 
-def transfroms_for_train(n_grid, coco_size: bool = False, overflow_bbox: bool = False, reverse_clip: bool = False):
+def transforms_for_train(n_grid, coco_size: bool = False, overflow_bbox: bool = False, reverse_clip: bool = False):
     scales = [608, 640, 672, 704, 736, 768, 800, 832, 864, 896, 928, 960, 992]  # from MOTR
     return T.MultiCompose([
         T.MultiRandomHorizontalFlip(),
@@ -230,29 +229,17 @@ def transfroms_for_train(n_grid, coco_size: bool = False, overflow_bbox: bool = 
     ])
 
 
-def transforms_for_eval():
-    return T.MultiCompose([
-        T.MultiRandomResize(sizes=[800], max_size=1333),
-        T.MultiCompose([
-            T.MultiToTensor(),
-            T.MultiNormalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-        ])
-    ])
-
-
 def build(config: dict, split: str):
     if split == "train":
         return DanceTrack(
             config=config,
             split=split,
-            transform=transfroms_for_train(
+            transform=transforms_for_train(
                 n_grid=config["PATCH_GRID"],
                 coco_size=config["COCO_SIZE"],
                 overflow_bbox=config["OVERFLOW_BBOX"],
                 reverse_clip=config["REVERSE_CLIP"]
             )
         )
-    elif split == "test":
-        return DanceTrack(config=config, split=split, transform=transforms_for_eval())
     else:
         raise ValueError(f"Data split {split} is not supported for DanceTrack dataset.")

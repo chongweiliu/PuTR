@@ -41,6 +41,8 @@ class RuntimeTracker:
         self.model = model
         self.device = next(model.parameters()).device
         
+        self.asso_thre1 = config["ASSO_THRE1"]
+        self.asso_thre2 = config["ASSO_THRE2"]
         self.dim = config["DIM"]
         self.n_grid = config["PATCH_GRID"]
         self.len_sampled_feature = config["PATCH_GRID"] * config["PATCH_GRID"] * 3
@@ -63,7 +65,7 @@ class RuntimeTracker:
         self.xy_pe = build_xy_pe(config=config)
         self.frame_pe = build_frame_pe(config=config)
         self.frame_pos = self.frame_pe(torch.arange(0, self.max_nframes + 1, dtype=torch.float32, device=self.device))
-        self.emb_id_list = list(np.arange(2, self.model.n_id_embedding))
+        # self.emb_id_list = list(np.arange(2, self.model.n_id_embedding))
         self.tid_2_emb_id = {}
         
         
@@ -88,7 +90,7 @@ class RuntimeTracker:
         cxcys = (dets[:, :2] + dets[:, 2:4]) / 2
         dets_xy_pos = self.xy_pe(cxcys[:, 0], cxcys[:, 1], img.shape[-2], img.shape[-1])
         dets_frame_pos = self.frame_pos[len(self.ntrk_per_frame)].unsqueeze(0).repeat(dets.shape[0], 1)
-        dets_emd_ids = torch.ones((dets.shape[0], ), dtype=torch.int32, device=self.device)
+        # dets_emd_ids = torch.ones((dets.shape[0], ), dtype=torch.int32, device=self.device)
         
 
         dets_iou = self.hmiou(dets[:, :4], dets[:, :4])
@@ -101,7 +103,7 @@ class RuntimeTracker:
             atten_mask, col_ids = self.get_atten_mask(input_tokens, trk_ids)
             inputs_xy_pos = torch.cat((self.bos, self.trk_xy_pos, dets_xy_pos), dim=0).unsqueeze(0)
             inputs_frame_pos = torch.cat((self.bos, self.trk_frame_pos, dets_frame_pos), dim=0).unsqueeze(0)
-            inputs_emd_ids = torch.cat((self.bos[0, 0:1], self.trk_emb_ids, dets_emd_ids), dim=0).unsqueeze(0).int()
+            inputs_emd_ids = 1 #torch.cat((self.bos[0, 0:1], self.trk_emb_ids, dets_emd_ids), dim=0).unsqueeze(0).int()
             
             output_tokens = self.model(input_tokens, inputs_frame_pos, inputs_xy_pos, inputs_emd_ids, atten_mask, is_projected=True).squeeze(0)
             
@@ -120,7 +122,7 @@ class RuntimeTracker:
             cost_matrix_box = self.hmiou(self.trks[:, TI.TLBR:TI.TLBR + 4], dets[:, :4])
             final_cost_matrix = (cost_matrix_f + cost_matrix_box) * dets[:, 4].unsqueeze(0) * self.trks[:, TI.Score].unsqueeze(1)
             
-            matches, untracks, undets = self.associate(final_cost_matrix, cost_matrix_box, cost_matrix_f, threshold=0.2)
+            matches, untracks, undets = self.associate(final_cost_matrix, cost_matrix_box, cost_matrix_f, threshold_1=self.asso_thre1, threshold_2=self.asso_thre2)
             matches, untracks, undets = torch.from_numpy(matches).to(self.device), torch.from_numpy(untracks).to(self.device), torch.from_numpy(undets).to(self.device)
             
             # track
@@ -136,7 +138,7 @@ class RuntimeTracker:
                 self.trks[m0, TI.ORIG_TLBR:TI.ORIG_TLBR + 4] = orig_dets[m1, :4]
                 matched_det_tokens = det_projected_tokens[m1, :]
                 matched_xy_pos = dets_xy_pos[m1, :]
-                matched_tid = torch.as_tensor([self.tid_2_emb_id[x] for x in self.trks[m0, TI.TrackID].int().tolist()], device=self.device, dtype=torch.int32)
+                # matched_tid = torch.as_tensor([self.tid_2_emb_id[x] for x in self.trks[m0, TI.TrackID].int().tolist()], device=self.device, dtype=torch.int32)
           
                 for i in range(len(m0)):
                     tid = self.trks[m0[i], TI.TrackID].int().item()
@@ -144,7 +146,7 @@ class RuntimeTracker:
             else:
                 matched_det_tokens = torch.zeros((0, self.dim), dtype=torch.float32, device=self.device)
                 matched_xy_pos = torch.zeros((0, self.dim), dtype=torch.float32, device=self.device)
-                matched_tid = torch.zeros((0, ), dtype=torch.int32, device=self.device)
+                # matched_tid = torch.zeros((0, ), dtype=torch.int32, device=self.device)
              
             #remove
             self.trks[untracks, TI.Hits] = 0
@@ -168,12 +170,15 @@ class RuntimeTracker:
             undets = torch.arange(dets.shape[0])
             matched_det_tokens = torch.zeros((0, self.dim), dtype=torch.float32, device=self.device)
             matched_xy_pos = torch.zeros((0, self.dim), dtype=torch.float32, device=self.device)
-            matched_tid = torch.zeros((0, ), dtype=torch.int32, device=self.device)
+            # matched_tid = torch.zeros((0, ), dtype=torch.int32, device=self.device)
         
         dets = dets[undets, :]
-        t = torch.logical_and(
-            dets[:, TI.Score] >= self.tracklet_score_thresh,
-            (dets_iou[undets].max(dim=1)[0] < self.dets_iou_thresh) + (self.frame_id < 5))
+        if dets_iou[undets].shape[0] != 0:
+            t = torch.logical_and(
+                dets[:, TI.Score] >= self.tracklet_score_thresh,
+                (dets_iou[undets].max(dim=1)[0] < self.dets_iou_thresh) + (self.frame_id < 5))
+        else:
+            t = dets[:, TI.Score] >= self.tracklet_score_thresh
         new_trks = dets[t, :]
         
         
@@ -195,7 +200,7 @@ class RuntimeTracker:
                 coords = coords[coords[:, 1] >= 0, :]
                 if coords.shape[0] == 0:
                     self.id_coords.pop(id)
-                    self.emb_id_list.append(self.tid_2_emb_id.pop(id))
+                    # self.emb_id_list.append(self.tid_2_emb_id.pop(id))
                 else:
                     self.id_coords[id] = coords
 
@@ -213,19 +218,19 @@ class RuntimeTracker:
             new_trks[:, TI.EndFrame] = self.frame_id
             new_trks[:, TI.State] = TS.New
             new_trks[:, TI.TrackID] = torch.arange(self.id_count, self.id_count + new_trks.shape[0], device=self.device, dtype=torch.float32)
-            new_trk_ids = new_trks[:, TI.TrackID].int()
+            # new_trk_ids = new_trks[:, TI.TrackID].int()
           
             for i in range(new_trks.shape[0]):
                 id = new_trks[i, TI.TrackID].int().item()
                 self.id_coords[id] = np.array([[self.frame_id, len(self.ntrk_per_frame) - 1, i, self.start_coord[-2] + i + matches.shape[0]]])
-                self.tid_2_emb_id[id] = self.emb_id_list.pop(0)
-                new_trk_ids[i] = self.tid_2_emb_id[id]
+                # self.tid_2_emb_id[id] = self.emb_id_list.pop(0)
+                # new_trk_ids[i] = self.tid_2_emb_id[id]
             self.id_count += new_trks.shape[0]
             self.trks = torch.cat((self.trks, new_trks), axis=0)
         else:
             new_trk_ids = torch.zeros((0, ), dtype=torch.int32, device=self.device)
          
-        self.trk_emb_ids = torch.cat([self.trk_emb_ids, matched_tid, new_trk_ids], dim=0)
+        # self.trk_emb_ids = torch.cat([self.trk_emb_ids, matched_tid, new_trk_ids], dim=0)
        
         self.frame_id += 1
         return self.trks
@@ -291,7 +296,7 @@ class RuntimeTracker:
         atten_mask = atten_mask.unsqueeze(0).unsqueeze(0)
         return atten_mask, col_ids
     
-    def associate(self, final_cost_matrix, cost_matrix_box, cost_matrix_f, threshold=0.1):
+    def associate(self, final_cost_matrix, cost_matrix_box, cost_matrix_f, threshold_1=0.1, threshold_2=0.1):
         if min(final_cost_matrix.shape) > 0:
             final_cost_matrix = final_cost_matrix.cpu().numpy()
             _, x, y = lap.lapjv(-final_cost_matrix, extend_cost=True)
@@ -312,7 +317,7 @@ class RuntimeTracker:
         # filter out matched with low IOU
         matches = []
         for i, j in matched_indices:
-            if (cost_matrix_box[i, j] < threshold) and (cost_matrix_f[i, j] < threshold):
+            if (cost_matrix_box[i, j] < threshold_1) and (cost_matrix_f[i, j] < threshold_2):
                 unmatched_detections.append(j)
                 unmatched_trackers.append(i)
             else:

@@ -13,7 +13,7 @@ from typing import Any, Optional, Tuple
 import torch
 import torch.nn.functional as F
 from torch import nn
-
+import torch.utils.checkpoint as chp
 
 class Attention(nn.Module):
     def __init__(self, head_dim: int, dim: int, n_heads: int, max_seq_len: int, drop_out: float=0.0):
@@ -158,6 +158,7 @@ class PuTR(nn.Module):
 
         # Initialize attribute for the loss of the last forward call. This will be set if the forward is called with a targets tensor.
         self.last_loss = None
+        self.save_memory = False
 
     def _init_weights(self, module):
         if isinstance(module, nn.Linear):
@@ -172,16 +173,24 @@ class PuTR(nn.Module):
             h = self.to_patch_embedding(tokens)
         else:
             h = tokens
-        id_emb = self.id_embedding(id_emb_idx)
+        id_emb = 1 #self.id_embedding(id_emb_idx)
         # id_emb = id_emb * (id_emb_idx != 0).float().unsqueeze(-1)
         h = h + frame_pos
         
         h = self.dropout(h)
 
         for layer in self.layers:
-            h = layer(h, xy_pos, frame_pos, id_emb, mask)
-        h = self.norm(h)
-        return self.mlp_head(h)
+            if self.save_memory:
+                h = chp.checkpoint(layer, h, xy_pos, frame_pos, id_emb, mask)
+            else:
+                h = layer(h, xy_pos, frame_pos, id_emb, mask)
+        if self.save_memory:
+            h = chp.checkpoint(self.norm, h)
+            return chp.checkpoint(self.mlp_head, h)
+        else:
+            h = self.norm(h)
+            return self.mlp_head(h)
+
     
     def project(self, tokens):
         return self.to_patch_embedding(tokens)
