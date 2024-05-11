@@ -1,4 +1,3 @@
-# Copyright (c) Ruopeng Gao. All Rights Reserved.
 import os
 import json
 import torch
@@ -6,24 +5,18 @@ import torch.nn as nn
 from datetime import datetime
 from tqdm import tqdm
 from os import path
-from typing import List
 from torch.utils.data import DataLoader
 import cv2
 import shutil
 import numpy as np
 import os
-import glob
+import time
 
 
 from models import build_model
-from models.utils import load_checkpoint, get_model
-from models.runtime_tracker import RuntimeTracker
-from utils.utils import yaml_to_dict, is_distributed, distributed_world_size, distributed_rank, inverse_sigmoid
-from utils.nested_tensor import tensor_list_to_nested_tensor
-from utils.box_ops import box_cxcywh_to_xyxy
+from models.utils import load_checkpoint
 from log.logger import Logger
 from data.seq_dataset import SeqDataset
-from structures.track_instances import TrackInstances
 from models.runtime_tracker import RuntimeTracker, TI, TS
 import random
 
@@ -63,22 +56,22 @@ class Submitter:
         self.random_color_list = generate_random_colors(100)
         
         self.min_track_hits = config["MIN_TRACK_HITS"]
-        
-        
-        
-        
-        
         return
 
     @torch.no_grad()
     def run(self):
         track_hit_dict = {}
         track_dict = {}
-        lost_dict = {}
+        # lost_dict = {}
         new_dict = {}
         
+        n_frame = len(self.dataset)
+        
+        time_per_frame = []
         bdd100k_results = []    # for bdd100k, will be converted into json file, different from other datasets.
         for i, (img, dets, orig_dets) in enumerate(tqdm(self.dataloader, desc=f"Submit seq: {self.seq_name}")):
+            start_time = time.time()
+            
             # if self.seq_name != "dancetrack0004":
             #     continue
             # img = img[0].cpu().numpy()[:, :, ::-1].astype("uint8")
@@ -104,7 +97,10 @@ class Submitter:
             trk_states = trks[:, TI.State].astype("int32")
             trk_ids = trks[:, TI.TrackID].astype("int32")
             trk_hits = trks[:, TI.Hits].astype("int32")
-
+            
+            end_time = time.time()
+            time_per_frame.append(end_time - start_time)
+            
             if self.visualize:
                 for xyxy, orig_xyxy, cls, score, state, idx in zip(dets, orig_dets, trk_cls, trk_scores, trk_states, trk_ids):
                     if state == TS.New:
@@ -117,7 +113,7 @@ class Submitter:
                 cv2.putText(orig_img, f"Frame: {i}", (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
                 cv2.imshow("img", orig_img)
                 cv2.waitKey(1)
-
+            
             for idx in range(len(dets)):
                 xyxy = orig_dets[idx]
                 tlwh = [xyxy[0], xyxy[1], xyxy[2] - xyxy[0], xyxy[3] - xyxy[1]]
@@ -141,8 +137,8 @@ class Submitter:
                         if track_id in track_hit_dict:
                             track_dict[track_id].extend(track_hit_dict[track_id])
                             track_hit_dict.pop(track_id)
-                elif state == TS.Lost:
-                    lost_dict.setdefault(track_id,[]).append([frame_id, track_id, *tlwh])
+                # elif state == TS.Lost:
+                #     lost_dict.setdefault(track_id,[]).append([frame_id, track_id, *tlwh])
                 elif state == TS.New:
                     new_dict.setdefault(track_id,[]).append([frame_id, track_id, *tlwh])
 
@@ -157,56 +153,56 @@ class Submitter:
             with open(os.path.join(self.predict_dir, '{}.json'.format(self.seq_name)), 'w', encoding='utf-8') as f:
                 json.dump(bdd100k_results, f)
 
-        return
+        return np.nanmean(time_per_frame)
 
-    @staticmethod
-    def filter_by_score(tracks: TrackInstances, thresh: float = 0.7):
-        keep = torch.max(tracks.scores, dim=-1).values > thresh
-        return tracks[keep]
+    # @staticmethod
+    # def filter_by_score(tracks, thresh: float = 0.7):
+    #     keep = torch.max(tracks.scores, dim=-1).values > thresh
+    #     return tracks[keep]
 
-    @staticmethod
-    def filter_by_area(tracks: TrackInstances, thresh: int = 100):
-        assert len(tracks.area) == len(tracks.ids), f"Tracks' 'area' should have the same dim with 'ids'"
-        keep = tracks.area > thresh
-        return tracks[keep]
+    # @staticmethod
+    # def filter_by_area(tracks, thresh: int = 100):
+    #     assert len(tracks.area) == len(tracks.ids), f"Tracks' 'area' should have the same dim with 'ids'"
+    #     keep = tracks.area > thresh
+    #     return tracks[keep]
 
-    def update_results(self, tracks_result: TrackInstances, frame_idx: int, results: list, img_path: str):
-        # Only be used for BDD100K:
-        bdd_cls2label = {
-            1: "pedestrian",
-            2: "rider",
-            3: "car",
-            4: "truck",
-            5: "bus",
-            6: "train",
-            7: "motorcycle",
-            8: "bicycle"
-        }
-        frame_result = {
-            "name": img_path.split("/")[-1],
-            "videoName": img_path.split("/")[-1][:-12],
-            # "frameIndex": int(img_path.split("/")[-1][:-4].split("-")[-1]) - 1
-            "frameIndex": frame_idx,
-            "labels": []
-        }
-        for i in range(len(tracks_result)):
-            x1, y1, x2, y2 = tracks_result.boxes[i].tolist()
-            ID = str(tracks_result.ids[i].item())
-            label = bdd_cls2label[tracks_result.labels[i].item() + 1]
-            frame_result["labels"].append(
-                {
-                    "id": ID,
-                    "category": label,
-                    "box2d": {
-                        "x1": x1,
-                        "y1": y1,
-                        "x2": x2,
-                        "y2": y2
-                    }
-                }
-            )
-        results.append(frame_result)
-        return
+    # def update_results(self, tracks_result, frame_idx: int, results: list, img_path: str):
+    #     # Only be used for BDD100K:
+    #     bdd_cls2label = {
+    #         1: "pedestrian",
+    #         2: "rider",
+    #         3: "car",
+    #         4: "truck",
+    #         5: "bus",
+    #         6: "train",
+    #         7: "motorcycle",
+    #         8: "bicycle"
+    #     }
+    #     frame_result = {
+    #         "name": img_path.split("/")[-1],
+    #         "videoName": img_path.split("/")[-1][:-12],
+    #         # "frameIndex": int(img_path.split("/")[-1][:-4].split("-")[-1]) - 1
+    #         "frameIndex": frame_idx,
+    #         "labels": []
+    #     }
+    #     for i in range(len(tracks_result)):
+    #         x1, y1, x2, y2 = tracks_result.boxes[i].tolist()
+    #         ID = str(tracks_result.ids[i].item())
+    #         label = bdd_cls2label[tracks_result.labels[i].item() + 1]
+    #         frame_result["labels"].append(
+    #             {
+    #                 "id": ID,
+    #                 "category": label,
+    #                 "box2d": {
+    #                     "x1": x1,
+    #                     "y1": y1,
+    #                     "x2": x2,
+    #                     "y2": y2
+    #                 }
+    #             }
+    #         )
+    #     results.append(frame_result)
+    #     return
 
     def write_results(self, tracks_result: dict):
         assert self.dataset_name in ["DanceTrack", "SportsMOT", "MOT17", "MOT20"], f"{self.dataset_name} dataset is not supported for submit process."
@@ -230,7 +226,8 @@ class Submitter:
             
         if self.dataset_name in ["MOT17", "MOT20"]:
             print(f"Run interpolation for {self.seq_name}")
-            tracks_result = dti(f"{self.predict_dir}/{self.seq_name}.txt")
+            n_dti = 20 if self.dataset_name == "MOT20" else 3
+            tracks_result = dti(f"{self.predict_dir}/{self.seq_name}.txt", n_dti=n_dti)
             if not os.path.exists(self.predict_dir + f"/dti"):
                 os.makedirs(self.predict_dir + f"/dti")
             with open(self.predict_dir + f"/dti/{self.seq_name}.txt", "a") as file:
@@ -289,8 +286,10 @@ def submit(config: dict):
     else:
         raise NotImplementedError(f"Do not support this Dataset name: {dataset_name}")
     
-
-    for seq_name in seq_names:
+    fps_list = []
+    n_seq = len(seq_names)
+    for idx, seq_name in enumerate(seq_names):
+        print(f"{idx + 1}/{n_seq}: {seq_name}")
         seq_name = str(seq_name)
         submitter = Submitter(
             config=config,
@@ -300,7 +299,11 @@ def submit(config: dict):
             outputs_dir=outputs_dir,
             model=model
         )
-        submitter.run()
+        avg_time_per_frame = submitter.run()
+        fps = 1. / avg_time_per_frame
+        print(f"{seq_name} FPS: {fps}")
+        fps_list.append(fps)
+    print(f"Average FPS: {np.nanmean(fps_list)}")
     
     if dataset_split == "val":
         tracker_dir = os.path.join(outputs_dir, "tracker")
@@ -340,7 +343,7 @@ def submit(config: dict):
         }
     return
 
-def dti(txt_path, n_min=25, n_dti=300): #n_dti MOT20 20; MOT17 3
+def dti(txt_path, n_min=25, n_dti=20): #n_dti MOT20 20; MOT17 3
     seq_data = np.loadtxt(txt_path, dtype=np.float64, delimiter=',')
     min_id = int(np.min(seq_data[:, 1]))
     max_id = int(np.max(seq_data[:, 1]))

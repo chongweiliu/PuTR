@@ -1,14 +1,3 @@
-# Copyright (c) Ruopeng Gao. All Rights Reserved.
-# ------------------------------------------------------------------------
-# Modified from MOTR (https://github.com/megvii-research/MOTR)
-# Copyright (c) 2021 megvii-model. All Rights Reserved.
-# ------------------------------------------------------------------------
-# Modified from Deformable DETR (https://github.com/fundamentalvision/Deformable-DETR)
-# Copyright (c) 2020 SenseTime. All Rights Reserved.
-# ------------------------------------------------------------------------
-# Modified from DETR (https://github.com/facebookresearch/detr)
-# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
-# ------------------------------------------------------------------------
 import random
 import torch
 import cv2
@@ -19,8 +8,6 @@ import torch.nn.functional as nF
 import numpy as np
 
 from math import floor
-from utils.box_ops import box_xyxy_to_cxcywh
-
 
 
 class MultiCompose:

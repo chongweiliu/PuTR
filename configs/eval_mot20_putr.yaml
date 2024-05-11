@@ -1,12 +1,8 @@
-# @Author       : Ruopeng Gao
-# @Description  : Config for training DanceTrack.
-#                 We change some parameters compared with our paper, looking forward more stable training convergence.
-
 GIT_VERSION:
 
 MODE: submit
 CONFIG_PATH:
-VISUALIZE: True
+VISUALIZE:  True
 AVAILABLE_GPUS: 0,
 DEVICE: cuda
 OUTPUTS_DIR: ./outputs/putr_mot20/
@@ -17,7 +13,8 @@ RESUME_SCHEDULER: True
 MULTI_CHECKPOINT: False
 
 # About submit
-SUBMIT_MODEL: /home/lcw/hdd/projects/PuTR/论文数据/mix/train_2024-04-24-11-53/checkpoint_6.pth
+SUBMIT_MODEL: /home/lcw/hdd/projects/PuTR/论文数据/sportsmot/无初始化直接训练train_2024-04-23-16-31/checkpoint_6.pth
+#  /home/lcw/hdd/projects/PuTR/论文数据/mot20/无初始化直接训练train_2024-04-24-17-51/checkpoint_6.pth
 SUBMIT_DATA_SPLIT: test
 DET_SCORE_THRESH: 0.1
 TRACK_SCORE_THRESH: 0.4

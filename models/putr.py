@@ -1,11 +1,3 @@
-# -*- coding: utf-8 -*-
-# @Time     : 2024/4/14 18:12
-# @Author   : Liu Chongwei
-# @FileName : putr
-# @Software : PyCharm
-
-# modified from https://github.com/DLLXW/baby-llama2-chinese/blob/main/model.py
-
 import math
 import inspect
 from typing import Any, Optional, Tuple

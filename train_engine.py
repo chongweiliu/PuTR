@@ -1,5 +1,3 @@
-# @Author       : Ruopeng Gao
-# @Date         : 2022/7/5
 import os
 import time
 import cv2
@@ -20,7 +18,7 @@ from utils.utils import is_distributed, distributed_rank, set_seed, is_main_proc
     distributed_world_size
 from models.utils import get_model, save_checkpoint, load_checkpoint
 from torch.optim.lr_scheduler import MultiStepLR, CosineAnnealingLR
-from log.logger import Logger, ProgressLogger
+from log.logger import Logger
 from log.log import MetricLog
 from models.utils import load_pretrained_model
 

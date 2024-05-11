@@ -1,25 +1,8 @@
-# @Author       : Ruopeng Gao
-# @Date         : 2022/7/6
-# @Description  : Data operators, such as data read, dataset, dataloader.
-
-"""
-In this package, should include the main operators about dataset.
-Mainly include below parts:
-1. Use dataset API (For example, COCO API) or just simple code to read files.
-2. Build a PyTorch Dataset.
-3. Build a PyTorch DataLoader.
-4. Maybe you should design a PyTorch Sampler class.
-5. Probably you should design how to transform the data.
-6. Sometimes, you should build a function 'collate_fn' to tell the dataloader how to aggregate a batch of data.
-
-The above features can be achieved in a single .py file or multi of them.
-"""
 from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data import RandomSampler, SequentialSampler, DataLoader
 from .dancetrack import build as build_dancetrack
 from .mot17 import build as build_mot17
 from .mix import build as build_mix
-from .bdd100k import build as build_bbd100k
 from torch.utils.data import Dataset
 from .utils import collate_fn
 from utils.utils import is_distributed
@@ -34,8 +17,6 @@ def build_dataset(config: dict, split: str) -> Dataset:
         return build_mot17(config=config, split=split)
     elif config["DATASET"] == "MOT20":
         return build_mot17(config=config, split=split)
-    elif config["DATASET"] == "BDD100K":
-        return build_bbd100k(config=config, split=split)
     elif config["DATASET"] == "MIX":
         return build_mix(config=config, split=split)
     else:

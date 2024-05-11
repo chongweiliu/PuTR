@@ -1,5 +1,3 @@
-# @Author       : Ruopeng Gao
-# @Date         : 2022/8/30
 import os
 from math import floor
 from random import randint

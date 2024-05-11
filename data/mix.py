@@ -1,13 +1,4 @@
-import math
-import os
-import torch
-import random
 import numpy as np
-from math import floor
-
-from collections import defaultdict
-from random import randint
-import cv2
 
 from .mot17 import MOT17
 from .dancetrack import DanceTrack

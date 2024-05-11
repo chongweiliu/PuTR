@@ -1,6 +1,3 @@
-# @Author       : Ruopeng Gao
-# @Date         : 2022/7/13
-# @Description  :
 import torch.distributed
 
 from typing import List, Any

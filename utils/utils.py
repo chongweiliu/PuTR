@@ -1,6 +1,3 @@
-# @Author       : Ruopeng Gao
-# @Date         : 2022/7/5
-# @Description  : Some utils.
 import os
 import yaml
 import torch
@@ -52,24 +49,4 @@ def set_seed(seed: int):
 def yaml_to_dict(path: str):
     with open(path) as f:
         return yaml.load(f.read(), yaml.FullLoader)
-
-
-def labels_to_one_hot(labels: np.ndarray, class_num: int):
-    return np.eye(N=class_num)[labels]
-
-
-def inverse_sigmoid(x, eps=1e-5):
-    """
-    if      x = 1/(1+exp(-y))
-    then    y = ln(x/(1-x))
-    Args:
-        x:
-        eps:
-
-    Returns:
-    """
-    x = x.clamp(min=0, max=1)
-    x1 = x.clamp(min=eps)
-    x2 = (1 - x).clamp(min=eps)
-    return torch.log(x1/x2)
 

@@ -1,6 +1,3 @@
-# @Author       : Ruopeng Gao
-
-
 import argparse
 
 

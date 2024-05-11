@@ -26,7 +26,7 @@ color_list = [[0, 0, 255], [255, 128, 0], [0, 192, 255], [0, 192, 255], [0, 128,
 
 def read(path):
 
-    gt_path_v1 = '/home/lcw/hdd/projects/PuTR/outputs/putr_mot20/test_2024-04-24-20-22-38/tracker/dti/' + path + '.txt'
+    gt_path_v1 = '/home/lcw/hdd/projects/PuTR/论文数据/mot17/预训练test_2024-04-24-19-49-56/tracker/' + path + '.txt'
     # gt_path_v1 = None
     gt_path_v2 = './YOLOX_outputs/ftv3_dt_val/ftv3_dt_val_test/' + path + '.txt'
     
@@ -104,9 +104,9 @@ def read(path):
             break
         elif cv2.waitKey(0) == ord('s'):
             cv2.imwrite(
-                f'/home/lcw/hdd/projects/HybirdSORT/exp_data_collections/img_sample/' + f'dancetrack_{path}_' + '0' * (
+                f'/home/lcw/桌面/' + f'dancetrack_{path}_' + '0' * (
                             6 - len(str(i))) + str(i) + '.jpg', img)
 
 
 if __name__ == "__main__":
-    read('MOT20-04')
+    read('MOT17-14-FRCNN')

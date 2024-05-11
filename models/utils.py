@@ -1,9 +1,4 @@
-# @Author       : Ruopeng Gao
-# @Date         : 2022/7/5
-# @Description  : To build a model.
 import torch
-import copy
-import math
 import torch.distributed
 import torch.nn as nn
 import torch.optim as optim
@@ -79,5 +74,3 @@ def load_pretrained_model(model: nn.Module, pretrained_path: str, show_details: 
     return model
 
 
-def logits_to_scores(logits: torch.Tensor):
-    return logits.sigmoid()

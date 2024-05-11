@@ -1,5 +1,3 @@
-# @Author       : Ruopeng Gao
-# @Date         : 2022/9/4
 import torch
 import math
 from torch import nn

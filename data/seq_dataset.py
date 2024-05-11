@@ -1,8 +1,5 @@
-# Copyright (c) Ruopeng Gao. All Rights Reserved.
 import os
 import cv2
-
-import torchvision.transforms.functional as F
 
 from torch.utils.data import Dataset
 from math import floor
@@ -20,8 +17,14 @@ class SeqDataset(Dataset):
         if 'DanceTrack' in seq_dir:
             det_path = os.path.join(seq_dir, 'det', 'byte065.txt')
         elif 'SportsMOT' in seq_dir:
-            det_path = os.path.join(seq_dir, 'det', 'yolox_x_train.txt')
-            # det_path = os.path.join(seq_dir, 'det', 'yolox_x_mix.txt')
+            if 'test' in seq_dir:
+                det_path = os.path.join(seq_dir, 'det', 'yolox_x_mix.txt')
+                print(f"Using the train+val det file for testing: {det_path}")
+            elif 'val' in seq_dir:
+                det_path = os.path.join(seq_dir, 'det', 'yolox_x_train.txt')
+                print(f"Using the train det file for validation: {det_path}")
+            else:
+                raise NotImplementedError(f"SeqDataset DO NOT support dataset '{seq_dir}'")
         elif 'MOT17' in seq_dir:
             det_path = os.path.join(seq_dir, 'det', 'byte065.txt')
         elif 'MOT20' in seq_dir:

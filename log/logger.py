@@ -1,6 +1,3 @@
-# @Author       : Ruopeng Gao
-# @Date         : 2022/7/5
-# @Description  : Logger will log information.
 import os
 import json
 import argparse
