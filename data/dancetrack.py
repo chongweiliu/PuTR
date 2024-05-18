@@ -8,7 +8,6 @@ import numpy as np
 import data.transforms as T
 from torch.utils.data import Dataset
 from collections import defaultdict
-from memory_profiler import profile
 
 class DanceTrack(Dataset):
     
@@ -31,6 +30,7 @@ class DanceTrack(Dataset):
         self.sample_intervals: list = config["SAMPLE_INTERVALS"]
         self.sample_modes: list = config["SAMPLE_MODES"]
         self.sample_lengths: list = config["SAMPLE_LENGTHS"]
+        assert self.sample_lengths[0] >= 2, "Sample length is less than 2."
         self.sample_stage = None
         self.sample_begin_frames = None
         self.sample_length = None
@@ -159,7 +159,6 @@ class DanceTrack(Dataset):
         info = {}
         ids_offset = self.vid_idx[vid] * 100000
 
-        # 真值：
         info["boxes"] = list()
         info["ids"] = list()
         info["labels"] = list()

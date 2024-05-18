@@ -47,7 +47,7 @@ class Submitter:
         self.device = next(self.model.parameters()).device
 
         self.visualize = config["VISUALIZE"]
-        # 对路径进行一些操作
+
         os.makedirs(self.predict_dir, exist_ok=True)
         if os.path.exists(os.path.join(self.predict_dir, f'{self.seq_name}.txt')):
             os.remove(os.path.join(self.predict_dir, f'{self.seq_name}.txt'))
@@ -62,24 +62,11 @@ class Submitter:
     def run(self):
         track_hit_dict = {}
         track_dict = {}
-        # lost_dict = {}
         new_dict = {}
         
-        n_frame = len(self.dataset)
-        
         time_per_frame = []
-        bdd100k_results = []    # for bdd100k, will be converted into json file, different from other datasets.
         for i, (img, dets, orig_dets) in enumerate(tqdm(self.dataloader, desc=f"Submit seq: {self.seq_name}")):
             start_time = time.time()
-            
-            # if self.seq_name != "dancetrack0004":
-            #     continue
-            # img = img[0].cpu().numpy()[:, :, ::-1].astype("uint8")
-            # dets = dets[0].cpu().numpy().astype("int32")
-            # for j in range(len(dets)):
-            #     cv2.rectangle(img, (dets[j][0], dets[j][1]), (dets[j][2], dets[j][3]), (0, 255, 0), 2)
-            # cv2.imshow("img", img)
-            # cv2.waitKey(1)
             
             orig_img = img[0].clone()
             orig_img = orig_img.cpu().numpy()[:, :, ::-1].astype("uint8")
@@ -126,83 +113,17 @@ class Submitter:
                         track_hit_dict.setdefault(track_id,[]).append([frame_id, track_id, *tlwh])
                     else:
                         track_dict.setdefault(track_id,[]).append([frame_id, track_id, *tlwh])
-
-                        # if self.dataset_name in ["MOT17", "MOT20"]:
-                        #     if track_id in lost_dict and len(lost_dict[track_id]) < 3:
-                        #         track_dict[track_id].extend(lost_dict[track_id])
-                        #         lost_dict.pop(track_id)
                         if track_id in new_dict:
                             track_dict[track_id].extend(new_dict[track_id])
                             new_dict.pop(track_id)
                         if track_id in track_hit_dict:
                             track_dict[track_id].extend(track_hit_dict[track_id])
                             track_hit_dict.pop(track_id)
-                # elif state == TS.Lost:
-                #     lost_dict.setdefault(track_id,[]).append([frame_id, track_id, *tlwh])
                 elif state == TS.New:
                     new_dict.setdefault(track_id,[]).append([frame_id, track_id, *tlwh])
 
-        if self.dataset_name == "BDD100K":
-            raise NotImplementedError("BDD100K dataset is not supported for submit process.")
-            # self.update_results(tracks_result=tracks_result, frame_idx=i, results=bdd100k_results, img_path=info[0])
-        else:
-            self.write_results(tracks_result=track_dict)
-
-
-        if self.dataset_name == "BDD100K":
-            with open(os.path.join(self.predict_dir, '{}.json'.format(self.seq_name)), 'w', encoding='utf-8') as f:
-                json.dump(bdd100k_results, f)
-
+        self.write_results(tracks_result=track_dict)
         return np.nanmean(time_per_frame)
-
-    # @staticmethod
-    # def filter_by_score(tracks, thresh: float = 0.7):
-    #     keep = torch.max(tracks.scores, dim=-1).values > thresh
-    #     return tracks[keep]
-
-    # @staticmethod
-    # def filter_by_area(tracks, thresh: int = 100):
-    #     assert len(tracks.area) == len(tracks.ids), f"Tracks' 'area' should have the same dim with 'ids'"
-    #     keep = tracks.area > thresh
-    #     return tracks[keep]
-
-    # def update_results(self, tracks_result, frame_idx: int, results: list, img_path: str):
-    #     # Only be used for BDD100K:
-    #     bdd_cls2label = {
-    #         1: "pedestrian",
-    #         2: "rider",
-    #         3: "car",
-    #         4: "truck",
-    #         5: "bus",
-    #         6: "train",
-    #         7: "motorcycle",
-    #         8: "bicycle"
-    #     }
-    #     frame_result = {
-    #         "name": img_path.split("/")[-1],
-    #         "videoName": img_path.split("/")[-1][:-12],
-    #         # "frameIndex": int(img_path.split("/")[-1][:-4].split("-")[-1]) - 1
-    #         "frameIndex": frame_idx,
-    #         "labels": []
-    #     }
-    #     for i in range(len(tracks_result)):
-    #         x1, y1, x2, y2 = tracks_result.boxes[i].tolist()
-    #         ID = str(tracks_result.ids[i].item())
-    #         label = bdd_cls2label[tracks_result.labels[i].item() + 1]
-    #         frame_result["labels"].append(
-    #             {
-    #                 "id": ID,
-    #                 "category": label,
-    #                 "box2d": {
-    #                     "x1": x1,
-    #                     "y1": y1,
-    #                     "x2": x2,
-    #                     "y2": y2
-    #                 }
-    #             }
-    #         )
-    #     results.append(frame_result)
-    #     return
 
     def write_results(self, tracks_result: dict):
         assert self.dataset_name in ["DanceTrack", "SportsMOT", "MOT17", "MOT20"], f"{self.dataset_name} dataset is not supported for submit process."
@@ -273,9 +194,6 @@ def submit(config: dict):
     if dataset_name == "DanceTrack" or dataset_name == "SportsMOT":
         data_split_dir = path.join(data_root, dataset_name, dataset_split)
         seq_names = os.listdir(data_split_dir)
-    elif dataset_name == "BDD100K":
-        data_split_dir = path.join(data_root, dataset_name, "images/track/", dataset_split)
-        seq_names = os.listdir(data_split_dir)
     elif dataset_name == "MOT17":
         data_split_dir = path.join(data_root, dataset_name, dataset_split)
         seq_names = os.listdir(data_split_dir)
@@ -290,6 +208,7 @@ def submit(config: dict):
     n_seq = len(seq_names)
     for idx, seq_name in enumerate(seq_names):
         print(f"{idx + 1}/{n_seq}: {seq_name}")
+        
         seq_name = str(seq_name)
         submitter = Submitter(
             config=config,
@@ -307,7 +226,6 @@ def submit(config: dict):
     
     if dataset_split == "val":
         tracker_dir = os.path.join(outputs_dir, "tracker")
-        # 进行指标计算
         data_dir = os.path.join(data_root, dataset_name)
         if dataset_name == "DanceTrack" or dataset_name == "SportsMOT":
             gt_dir = os.path.join(data_dir, dataset_split)
@@ -323,14 +241,6 @@ def submit(config: dict):
                 f"--SKIP_SPLIT_FOL True --TRACKERS_TO_EVAL '' --TRACKER_SUB_FOLDER ''  --USE_PARALLEL True "
                 f"--NUM_PARALLEL_CORES 8 --PLOT_CURVES False "
                 f"--TRACKERS_FOLDER {tracker_dir}")
-        elif "MOT17" in dataset_name:
-            os.system(
-                f"python3 TrackEval/scripts/run_mot_challenge.py --SPLIT_TO_EVAL {dataset_split}  "
-                f"--METRICS HOTA CLEAR Identity  --GT_FOLDER {gt_dir} "
-                f"--SEQMAP_FILE {os.path.join(data_dir, f'{dataset_split}_seqmap.txt')} "
-                f"--SKIP_SPLIT_FOL True --TRACKERS_TO_EVAL '' --TRACKER_SUB_FOLDER ''  --USE_PARALLEL True "
-                f"--NUM_PARALLEL_CORES 8 --PLOT_CURVES False "
-                f"--TRACKERS_FOLDER {tracker_dir} --BENCHMARK MOT17")
         else:
             raise NotImplementedError(f"Do not support this Dataset name: {dataset_name}")
         

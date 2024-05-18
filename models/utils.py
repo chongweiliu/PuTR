@@ -3,7 +3,6 @@ import torch.distributed
 import torch.nn as nn
 import torch.optim as optim
 
-from torch.nn.parallel import DistributedDataParallel as DDP
 from utils.utils import is_distributed, distributed_rank, is_main_process
 
 

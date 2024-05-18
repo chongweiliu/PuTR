@@ -1,10 +1,6 @@
 import random
 import torch
 import cv2
-import copy
-import torchvision.transforms as T
-import torchvision.transforms.functional as F
-import torch.nn.functional as nF
 import numpy as np
 
 from math import floor
@@ -99,79 +95,6 @@ class MultiRandomResize:
             imgs[i], infos[i] = resize(imgs[i], infos[i], size=new_size, max_size=self.max_size)
         return imgs, infos
 
-
-# class MultiToTensor:
-#     def __call__(self, imgs, infos):
-#         tensor_imgs = list(map(F.to_tensor, imgs))
-#         return tensor_imgs, infos
-
-
-class MultiNormalize:
-    def __init__(self, mean, std):
-        self.mean = mean
-        self.std = std
-
-    def __call__(self, imgs, infos):
-        def normalize(img: torch.Tensor, info):
-            img = torch.as_tensor(img).permute(2, 0, 1).float()
-            # info["unnorm_img"] = img.clone()
-
-            img = F.normalize(img / 255., mean=self.mean, std=self.std)
-
-            # h, w = img.shape[-2:]
-            # if len(info["boxes"]) > 0:
-            #     info["norm_boxes"] = box_xyxy_to_cxcywh(info["boxes"])
-            #     info["norm_boxes"] = info["boxes"] / torch.as_tensor([w, h, w, h])
-            return img, info
-        return zip(*[normalize(img, info) for img, info in zip(imgs, infos)])
-
-
-    
-# class MultiGridSample:
-#     def __init__(self, n_grid):
-#         self.n_grid = n_grid
-#
-#     def __call__(self, imgs, infos):
-#         def grid_sample(img: torch.Tensor, info):
-#             assert isinstance(img, torch.Tensor), "Image should be Tensor type before normalize."
-#             img_ = img.unsqueeze(0)  # (1, C, H, W)
-#             img_h, img_w = img_.shape[-2:]
-#             if len(info["boxes"]) > 0:
-#                 box = info["boxes"] # x1y1x2y2
-#                 widths = box[:, 2] - box[:, 0] + 0.5
-#                 heights = box[:, 3] - box[:, 1] + 0.5
-#
-#                 # 计算每个网格的宽度和高度
-#                 grid_widths = (widths / self.n_grid).view(-1, 1, 1)
-#                 grid_heights = (heights / self.n_grid).view(-1, 1, 1)
-#
-#                 # 生成网格坐标
-#                 x = torch.linspace(0, self.n_grid - 1, self.n_grid, dtype=torch.float32)
-#                 y = torch.linspace(0, self.n_grid - 1, self.n_grid, dtype=torch.float32)
-#                 yv, xv = torch.meshgrid(x, y)
-#
-#                 # 将网格坐标转化为每个网格的中点坐标
-#                 grid_x = box[:, 0].view(-1, 1, 1) + (xv + 0.5).unsqueeze(0) * grid_widths
-#                 grid_y = box[:, 1].view(-1, 1, 1) + (yv + 0.5).unsqueeze(0) * grid_heights
-#
-#                 # 将每个网格的中点坐标拼接成一个数组
-#                 grid_coordinates = torch.stack((grid_x, grid_y), dim=3) #(n, 14, 14, 2)
-#
-#                 # 将网格坐标转化为归一化坐标范围(-1, 1)
-#                 grid_coordinates[:, :, :, 0] = grid_coordinates[:, :, :, 0] / img_w * 2 - 1
-#                 grid_coordinates[:, :, :, 1] = grid_coordinates[:, :, :, 1] / img_h * 2 - 1
-#
-#                 # 使用F.grid_sample进行采样
-#                 sampled_features = nF.grid_sample(
-#                     img_, grid_coordinates.reshape(1, grid_coordinates.shape[0] * grid_coordinates.shape[1], grid_coordinates.shape[2], 2), mode='bilinear',
-#                     padding_mode='zeros').permute(0, 2, 3, 1).reshape(-1, self.n_grid * self.n_grid * img_.shape[1])
-#
-#                 info["sampled_features"] = sampled_features
-#             else:
-#                 info["sampled_features"] = torch.zeros((0, self.n_grid * self.n_grid * img_.shape[1]))
-#             return img, info
-#         return zip(*[grid_sample(img, info) for img, info in zip(imgs, infos)])
-
 class MultiRandomCrop:
     def __init__(self, min_size: int, max_size: int, overflow_bbox: bool = False):
         self.min_size = min_size
@@ -219,59 +142,6 @@ class MultiRandomCrop:
         return imgs, infos
 
 
-# class MultiRandomShift:
-#     def __init__(self, max_shift: int = 50):
-#         self.max_shift = max_shift
-#
-#     def __call__(self, imgs: list, infos: list):
-#         res_imgs, res_infos = [], []
-#         n_frames = len(imgs)
-#         w, h = imgs[0].size
-#         x_shift = (self.max_shift * torch.rand(1)).ceil()
-#         x_shift *= (torch.randn(1) > 0.0).int() * 2 - 1
-#         y_shift = (self.max_shift * torch.rand(1)).ceil()
-#         y_shift *= (torch.randn(1) > 0.0).int() * 2 - 1
-#         res_imgs.append(imgs[0])
-#         res_infos.append(infos[0])
-#
-#         def shift(image, info, region, target_h, target_w):
-#             cropped_image = F.crop(image, *region)
-#             cropped_image = F.resize(cropped_image, [target_h, target_w])
-#
-#             top, left, height, width = region
-#
-#             if "boxes" in info:
-#                 info["boxes"] = info["boxes"] - torch.as_tensor([left, top, left, top])
-#                 info["boxes"] *= torch.as_tensor([target_w / width, target_h / height, target_w / width, target_h / height])
-#                 max_wh = torch.as_tensor([target_w, target_h])
-#                 info["boxes"] = torch.min(info["boxes"].reshape(-1, 2, 2), max_wh)
-#                 info["boxes"] = info["boxes"].clamp(min=0)
-#                 keep_idxs = torch.all(torch.as_tensor(info["boxes"][:, 1, :] > info["boxes"][:, 0, :]), dim=1)
-#                 info["boxes"] = info["boxes"].reshape(-1, 4)
-#
-#                 for field in ["labels", "ids", "boxes", "areas"]:
-#                     info[field] = info[field][keep_idxs]
-#             return cropped_image, info
-#
-#         for i in range(1, n_frames):
-#             y_min = max(0, -y_shift[0].item())
-#             y_max = min(h, h - y_shift[0].item())
-#             x_min = max(0, -x_shift[0].item())
-#             x_max = max(w, w - x_shift[0].item())
-#             prev_img = res_imgs[i - 1].copy()
-#             prev_info = copy.deepcopy(res_infos[i - 1])
-#             shift_region = (int(y_min), int(x_min), int(y_max - y_min), int(x_max - x_min))
-#             img_i, info_i = shift(image=prev_img, info=prev_info, region=shift_region, target_h=h, target_w=w)
-#             res_imgs.append(img_i)
-#             res_infos.append(info_i)
-#
-#         if torch.randn(1)[0].item() > 0:
-#             res_imgs.reverse()
-#             res_infos.reverse()
-#
-#         return res_imgs, res_infos
-
-
 class MultiHSV:
     """
     From YOLOX [https://github.com/Megvii-BaseDetection/YOLOX/blob/main/yolox/data/data_augment.py] and MOTRv2.
@@ -298,15 +168,3 @@ class MultiHSV:
             imgs[i], infos[i] = hsv(imgs[i], infos[i])
         return imgs, infos
     
-# class MultiReverseClip:
-#     def __init__(self, reverse: bool = False):
-#         self.reverse = reverse
-#         assert self.reverse == 0.0, "Reverse clip is banned."
-#
-#     def __call__(self, imgs, infos):
-#         if random.random() < self.reverse:   # Reverse this clip.
-#             imgs = list(imgs)
-#             infos = list(infos)
-#             imgs.reverse()
-#             infos.reverse()
-#         return imgs, infos

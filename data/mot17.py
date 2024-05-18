@@ -1,7 +1,6 @@
 import math
 import os
 import torch
-import random
 import numpy as np
 from math import floor
 
@@ -32,6 +31,7 @@ class MOT17(Dataset):
         self.sample_intervals: list = config["SAMPLE_INTERVALS"]
         self.sample_modes: list = config["SAMPLE_MODES"]
         self.sample_lengths: list = config["SAMPLE_LENGTHS"]
+        assert self.sample_lengths[0] >= 2, "Sample length is less than 2."
         self.sample_stage = None
         self.sample_begin_frames = None
         self.sample_length = None
@@ -92,16 +92,11 @@ class MOT17(Dataset):
                 id_coors_all_frame = id_coors[id]
                 if len(id_coors_all_frame) > 1:
                     ids_pervious_coord[coor_in_frame, :] = id_coors_all_frame[pos_in_id - 1]
-                    # temp = [0.] * n_box
-                    # temp[coor_in_frame] = 1.
-                    # gt.append(temp)
                     gt.append(coor_in_frame)
             infos[fidx]["ids_pervious_coord"] = torch.as_tensor(ids_pervious_coord)
             if gt:
-                # infos[fidx]["gt"] = torch.as_tensor(gt, dtype=torch.float32)
                 infos[fidx]["gt"] = torch.as_tensor(gt, dtype=torch.int64)
             else:
-                # infos[fidx]["gt"] = torch.zeros((0, 0))
                 infos[fidx]["gt"] = torch.zeros((0,), dtype=torch.int64)
         infos[-1]["id_coords"] = id_coors
         return {
@@ -142,7 +137,6 @@ class MOT17(Dataset):
             for t in range(t_min, t_max - (self.sample_length - 1) + 1, self.sample_length // 2):
                 self.sample_begin_frames.append((vid, t))
         self.sample_begin_frames = np.array(self.sample_begin_frames)
-        # self.sample_begin_frames = self.sample_begin_frames[:1000]
         print(f"Epoch {epoch}, Sample length {self.sample_length}")
         
         return
@@ -158,7 +152,6 @@ class MOT17(Dataset):
         info = {}
         ids_offset = self.vid_idx[vid] * 100000
         
-        # 真值：
         info["boxes"] = list()
         info["ids"] = list()
         info["labels"] = list()
@@ -208,8 +201,6 @@ def transforms_for_train(n_grid, coco_size: bool = False, overflow_bbox: bool = 
     return T.MultiCompose(
         [
             T.MultiRandomHorizontalFlip(),
-            # T.MultiRandomResize(sizes=scales, max_size=1536),
-            
             T.MultiRandomSelect(
                 T.MultiRandomResize(sizes=scales, max_size=1536),
                 T.MultiCompose(

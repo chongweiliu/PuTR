@@ -18,21 +18,9 @@ def parse_option():
     parser.add_argument("--available-gpus", type=str, help="Available GPUs, like '0,1,2,3'.")
     parser.add_argument("--use-distributed", action="store_true", help="Use distributed training.")
 
-    # Running mode, Training? Evaluation? or ?
-    parser.add_argument("--mode", type=str, help="Running mode.")
-
     # Only For **Result Submit Process**:
-    parser.add_argument("--submit-dir", type=str)
     parser.add_argument("--submit-model", type=str)
     parser.add_argument("--submit-data-split", type=str)
-
-    # Only For **Model Eval Process**:
-    parser.add_argument("--eval-dir", type=str)
-    parser.add_argument("--eval-mode", type=str)
-    parser.add_argument("--eval-model", type=str)
-    parser.add_argument("--eval-threads", type=int)
-    parser.add_argument("--eval-port", type=int)
-    parser.add_argument("--eval-data-split", type=str)
 
     # Pretrained Model Load:
     parser.add_argument("--pretrained-model", type=str, help="Pretrained model path.")
@@ -42,41 +30,11 @@ def parse_option():
 
     # About Paths:
     # Config file:
-    parser.add_argument("--config-path", type=str, help="Config file path.",
-                        default="./configs/train_dancetrack.yaml")
+    parser.add_argument("--config-path", type=str, help="Config file path.")
     # Data Path:
     parser.add_argument("--data-root", type=str, help="Dataset root dir.", default="./datasets")
-    parser.add_argument("--dataset", type=str)
-    parser.add_argument("--data-path", type=str)
     # Log outputs:
     parser.add_argument("--outputs-dir", type=str, help="Outputs dir path.")
-
-    # Data:
-    parser.add_argument("--accumulation-steps", type=int, help="Gradient accumulation steps.")
-    parser.add_argument("--batch-size", type=int, help="Batch size for training.")
-    parser.add_argument("--coco-size", type=str)
-    parser.add_argument("--overflow-bbox", type=str)
-    parser.add_argument("--reverse-clip", type=float)
-    parser.add_argument("--use-motsynth", type=str)
-    parser.add_argument("--use-crowdhuman", type=str)
-    parser.add_argument("--motsynth-rate", type=float)
-
-    # Training setting：
-    parser.add_argument("--weight-decay", type=float)
-    parser.add_argument("--lr", type=float)
-    parser.add_argument("--lr-points", type=float)
-    parser.add_argument("--lr-backbone", type=float)
-
-    # Submit setting：
-    parser.add_argument("--miss-tolerance", type=float)
-
-    # Model setting：
-    parser.add_argument("--num-det-queries", type=int)
-    parser.add_argument("--merge-det-track-layer", type=int)
-
-    # Training augmentation:
-    parser.add_argument("--tp-drop-rate", type=float)
-    parser.add_argument("--fp-insert-rate", type=float)
 
     return parser.parse_args()
 

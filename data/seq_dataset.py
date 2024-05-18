@@ -6,13 +6,8 @@ from math import floor
 import numpy as np
 class SeqDataset(Dataset):
     def __init__(self, seq_dir: str):
-        # a hack implementation for BDD100K and others:
-        if "BDD100K" in seq_dir:
-            image_paths = sorted(os.listdir(os.path.join(seq_dir)))
-            image_paths = [os.path.join(seq_dir, _) for _ in image_paths if ("jpg" in _) or ("png" in _)]
-        else:
-            image_paths = sorted(os.listdir(os.path.join(seq_dir, "img1")))
-            image_paths = [os.path.join(seq_dir, "img1", _) for _ in image_paths if ("jpg" in _) or ("png" in _)]
+        image_paths = sorted(os.listdir(os.path.join(seq_dir, "img1")))
+        image_paths = [os.path.join(seq_dir, "img1", _) for _ in image_paths if ("jpg" in _) or ("png" in _)]
         
         if 'DanceTrack' in seq_dir:
             det_path = os.path.join(seq_dir, 'det', 'byte065.txt')
@@ -111,8 +106,6 @@ class SeqDataset(Dataset):
                 dets.append([t, x, y, x + w, y + h, s]) # [t, x1, y1, x2, y2]
             
         return np.array(dets, dtype=np.float32)
-    
-    
     
     def __getitem__(self, item):
         image = self.load(self.image_paths[item])
