@@ -8,3 +8,4 @@ def collate_fn(batch):
         collated_batch["infos"].append(data["infos"])
     return collated_batch
     
+    

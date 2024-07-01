@@ -11,3 +11,4 @@ def build_model(config: dict):
         model.to(device=torch.device(config["DEVICE"]))
     return model
 
+

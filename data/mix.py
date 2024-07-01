@@ -88,3 +88,4 @@ def build(config: dict, split: str):
         )
     else:
         raise NotImplementedError(f"MOT Dataset 'build' function do not support split {split}.")
+    

@@ -168,3 +168,4 @@ class MultiHSV:
             imgs[i], infos[i] = hsv(imgs[i], infos[i])
         return imgs, infos
     
+    

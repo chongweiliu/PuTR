@@ -53,3 +53,4 @@ def build_xy_pe(config: dict):
 
 def build_frame_pe(config: dict):
     return SinusoidalPositionalEmbedding(num_pos_feats=config["DIM"], temperature=10000)
+

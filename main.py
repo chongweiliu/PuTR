@@ -69,3 +69,4 @@ if __name__ == '__main__':
     merged_config = update_config(config=cfg, option=opt)
     merged_config["CONFIG_PATH"] = opt.config_path
     main(config=merged_config)
+

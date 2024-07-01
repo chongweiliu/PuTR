@@ -92,3 +92,4 @@ def merge_dicts(dicts: List[dict]) -> dict:
                 merged[k] = list()
             merged[k] += v
     return merged
+

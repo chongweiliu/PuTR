@@ -196,3 +196,4 @@ def build(config: dict):
         patch_grid=config["PATCH_GRID"],
         drop_out=config.get("DROP_OUT", 0.0)
         )
+
