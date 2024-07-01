@@ -1,10 +1,11 @@
-# PuTR: A Pure Transformer for Decoupled and Online Multi-Object Tracking
-
+# PuTR: A Pure Transformer for Decoupled and Online Multi-Object Tracking [[arXiv]](https://www.arxiv.org/abs/2405.14119)
 
 ## Abstract
 Recent advances in Multi-Object Tracking (MOT) have achieved remarkable success in short-term association within the decoupled tracking-by-detection online paradigm. However, long-term tracking still remains a challenging task. Although graph-based approaches can address this issue by modeling trajectories as a graph in the decoupled manner, their non-online nature poses obstacles for real-time applications. In this paper, we demonstrate that the trajectory graph is a directed acyclic graph, which can be represented by an object sequence arranged by frame and a binary adjacency matrix. It is a coincidence that the binary matrix matches the attention mask in the Transformer, and the object sequence serves exactly as a natural input sequence. Intuitively, we propose that a pure Transformer can naturally unify short- and long-term associations in a decoupled and online manner. Our experiments show that a classic Transformer architecture naturally suits the association problem and achieves a strong baseline compared to existing foundational methods across four datasets: DanceTrack, SportsMOT, MOT17, and MOT20, as well as superior generalizability in domain shift. Moreover, the decoupled property also enables efficient training and inference. This work pioneers a promising Transformer-based approach for the MOT task, and provides code to facilitate further research.
 ![PuTR](./assets/intro.jpg)
 
+## News :fire:
+- 2024.07.01: We release the code and models of PuTR.
 
 ## Installation
 
@@ -43,7 +44,7 @@ DATA_ROOT/
     ├── train/
     └── test/
 ```
-Download [our detections](https://www.dropbox.com/scl/fi/usaoubca5to6jyd6e3a57/datasets.zip?rlkey=yoyf3e6aqsea06p4sotvq8mng&st=19cdokxy&dl=0) and [pretrained models](https://www.dropbox.com/scl/fi/9uyp4yy7z2yqr3of6od34/weights.zip?rlkey=0xnerp1u9dp09wh9evc1d57qf&st=2iqwze4s&dl=0) and arrange them according to the expected file structure.
+Download [our detections](https://drive.google.com/drive/folders/1nk6kAizjjobHA9yPsDcJxUqjyjUVcLwb?usp=sharing) and [pretrained models](https://drive.google.com/drive/folders/1mpP0U_bnrdgEy3sJUKMfEWghlOuWZnZI) and arrange them according to the expected file structure.
 
 ## Training
 Training PuTR only needs a single GPU (recommended to use GPU with >= 24 GB Memory, like RTX 4090 or some else).
@@ -93,4 +94,19 @@ To test on other datasets, you can replace the `--config-path` in the above comm
 | Methods | IDF1 | HOTA       | MOTA  |
 | ------- | ---- |------------|-------|
 | PuTR | 74.1|  61.1|  74.8 |
+
+## Citation
+```bibtex
+@article{liu2024putr,
+  title={PuTR: A Pure Transformer for Decoupled and Online Multi-Object Tracking},
+  author={Liu, Chongwei and Li, Haojie and Wang, Zhihui and Xu, Rui},
+  journal={arXiv preprint arXiv:2405.14119},
+  year={2024}
+}
+```
+## Acknowledgement
+- [MeMOTR](https://github.com/MCG-NJU/MeMOTR)
+- [TrackEval](https://github.com/JonathonLuiten/TrackEval)
+- [MixSort](https://github.com/MCG-NJU/MixSort)
+- [YOLOX](https://github.com/Megvii-BaseDetection/YOLOX)
 
